@@ -1,0 +1,44 @@
+# macOS / editor noise
+.DS_Store
+**/.DS_Store
+*.swp
+*.swo
+
+# Python / Node caches
+__pycache__/
+*.py[cod]
+node_modules/
+
+# Local runtime, models, generated outputs, and binary dependencies
+Tailect_ASR_Win10/models/
+Tailect_ASR_Win10/bin/
+Tailect_ASR_Win10/VC运行库/
+Tailect_ASR_Win10/outputs/
+Tailect_ASR_Win10/WPy64-312101/
+
+# Prompt/reference materials may contain audio, screenshots, cookies, or case data.
+prompt材料/
+
+# Temporary probes, mock servers, update packages, and local artifacts
+spyware-translator/temp/
+
+# Large or local-only artifacts
+*.wav
+*.mp3
+*.mp4
+*.srt
+*.zip
+*.7z
+*.rar
+*.exe
+*.dll
+*.bin
+*.onnx
+*.pt
+*.pth
+*.safetensors
+
+# Environment and logs
+.env
+.env.*
+*.log
