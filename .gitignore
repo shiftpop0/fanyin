@@ -16,9 +16,6 @@ Tailect_ASR_Win10/VC运行库/
 Tailect_ASR_Win10/outputs/
 Tailect_ASR_Win10/WPy64-312101/
 
-# Prompt/reference materials may contain audio, screenshots, cookies, or case data.
-prompt材料/
-
 # Temporary probes, mock servers, update packages, and local artifacts
 spyware-translator/temp/
 
@@ -42,3 +39,35 @@ spyware-translator/temp/
 .env
 .env.*
 *.log
+
+# Keep the project materials requested for GitHub.
+!prompt材料/
+!prompt材料/**
+prompt材料/**/.DS_Store
+
+!spyware-translator/
+!spyware-translator/**
+spyware-translator/**/.DS_Store
+spyware-translator/**/__pycache__/
+spyware-translator/**/*.pyc
+
+# Keep the small Tailect launcher and the qwen_asr CLI source slice,
+# while excluding the huge WinPython runtime and model payloads above.
+!Tailect_ASR_Win10/
+!Tailect_ASR_Win10/一键启动WebUI.bat
+!Tailect_ASR_Win10/项目说明.txt
+!Tailect_ASR_Win10/WPy64-312101/
+Tailect_ASR_Win10/WPy64-312101/*
+!Tailect_ASR_Win10/WPy64-312101/python/
+Tailect_ASR_Win10/WPy64-312101/python/*
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/
+Tailect_ASR_Win10/WPy64-312101/python/Lib/*
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/
+Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/*
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/
+Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/*
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/
+Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/*
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/*.py
+Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/*副本*.py
+Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/__pycache__/

@@ -1,0 +1,21 @@
+请求头
+GET /spyfile/audiostream.wav?targetfile=6861c1dd-5ea3-4dd2-947b-5a0d4489c8f1.wav&index=0 HTTP/1.1
+Accept: */*
+Accept-Encoding: identity;q=1, *;q=0
+Accept-Language: zh-CN,zh;q=0.9
+Connection: keep-alive
+Cookie: spywareapp=<redacted>
+Host: spyware.zj.jz
+Range: bytes=0-
+Referer: http://spyware.zj.jz/spywareapp/index.html
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.95 Safari/537.36
+
+响应
+HTTP/1.1 206 Partial Content
+Accept-Ranges: bytes
+Access-Control-Allow-Origin: *
+Content-Type: audio/x-wav
+Date: Mon, 27 Apr 2026 11:57:48 GMT
+Content-Range: bytes 0-2529929/2529930
+Content-Length: 2529930
+
