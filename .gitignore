@@ -55,6 +55,14 @@ spyware-translator/**/*.pyc
 # while excluding the huge WinPython runtime and model payloads above.
 !Tailect_ASR_Win10/
 !Tailect_ASR_Win10/一键启动WebUI.bat
+!Tailect_ASR_Win10/一键启动API服务.bat
+!Tailect_ASR_Win10/一键模型自检.bat
+!Tailect_ASR_Win10/API服务-启动.bat
+!Tailect_ASR_Win10/API服务-停止.bat
+!Tailect_ASR_Win10/API服务-状态.bat
+!Tailect_ASR_Win10/API_v1_离线部署与联调手册.md
+!Tailect_ASR_Win10/api_v1_config.json
+!Tailect_ASR_Win10/api_v1_service.ps1
 !Tailect_ASR_Win10/项目说明.txt
 !Tailect_ASR_Win10/WPy64-312101/
 Tailect_ASR_Win10/WPy64-312101/*
@@ -64,6 +72,7 @@ Tailect_ASR_Win10/WPy64-312101/python/*
 Tailect_ASR_Win10/WPy64-312101/python/Lib/*
 !Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/
 Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/*
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/.gitignore
 !Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/
 Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/*
 !Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/
@@ -71,3 +80,13 @@ Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/*
 !Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/*.py
 Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/*副本*.py
 Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/__pycache__/
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/
+Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/*
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/__init__.py
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/__main__.py
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/cli/
+Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/cli/*
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/cli/__init__.py
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/cli/api_v1.py
+!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/cli/preflight.py
+Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/cli/__pycache__/
