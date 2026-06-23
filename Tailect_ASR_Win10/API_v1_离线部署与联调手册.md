@@ -20,6 +20,13 @@
 Tailect_ASR_Win10\API服务-启动.bat
 ```
 
+启动脚本会轮询 `http://127.0.0.1:<port>/health`，只有返回 `status=ok` 后才报告启动成功，默认最长等待 180 秒。如果模型进程提前退出或超时，脚本返回非零退出码并提示 stderr 日志位置。
+
+如果配置端口已被占用：
+
+- 占用者是健康的 Tailect v1 API 时，脚本复用该进程并刷新 PID 文件。
+- 占用者不是 Tailect v1 API 时，脚本拒绝启动并返回非零退出码。
+
 默认配置文件：
 
 ```text
@@ -59,6 +66,12 @@ Tailect_ASR_Win10\API服务-停止.bat
 
 ```bat
 Tailect_ASR_Win10\一键启动API服务.bat
+```
+
+也可以直接传入模型名和端口：
+
+```bat
+Tailect_ASR_Win10\一键启动API服务.bat Taizhou 8885
 ```
 
 手工启动：
@@ -198,6 +211,13 @@ curl -X POST "http://127.0.0.1:8885/v1/audiototext?model=Taizhou" ^
 
 ```bat
 Tailect_ASR_Win10\一键模型自检.bat
+```
+
+可跳过交互选择，直接指定模型：
+
+```bat
+Tailect_ASR_Win10\一键模型自检.bat Taizhou
+Tailect_ASR_Win10\一键模型自检.bat Tiantai
 ```
 
 联调验收：

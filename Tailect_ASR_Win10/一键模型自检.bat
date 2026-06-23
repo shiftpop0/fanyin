@@ -79,6 +79,7 @@ python -m tailect_asr.cli.preflight ^
   --queue-timeout-sec 600 ^
   --rate-limit-per-minute 60 ^
   --diarize
+set "EXIT_CODE=%ERRORLEVEL%"
 
-endlocal
 pause
+endlocal & exit /b %EXIT_CODE%

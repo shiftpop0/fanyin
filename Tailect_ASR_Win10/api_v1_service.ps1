@@ -11,7 +11,12 @@ if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
   $ConfigPath = Join-Path $RootDir "api_v1_config.json"
 }
 if (-not [System.IO.Path]::IsPathRooted($ConfigPath)) {
-  $ConfigPath = Join-Path $RootDir $ConfigPath
+  $currentCandidate = [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path $ConfigPath))
+  if (Test-Path -LiteralPath $currentCandidate) {
+    $ConfigPath = $currentCandidate
+  } else {
+    $ConfigPath = Join-Path $RootDir $ConfigPath
+  }
 }
 $ConfigPath = [System.IO.Path]::GetFullPath($ConfigPath)
 
@@ -84,6 +89,50 @@ function Get-ListeningProcessId {
   return $null
 }
 
+function Get-ProcessById {
+  param([int]$ProcessId)
+  return Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+}
+
+function Test-IsApiProcess {
+  param($Process)
+  return $null -ne $Process -and [string]$Process.CommandLine -like "*tailect_asr.cli.api_v1*"
+}
+
+function Get-HealthPayload {
+  param([int]$Port)
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 5
+    if ([int]$response.StatusCode -ne 200) {
+      return $null
+    }
+    return $response.Content | ConvertFrom-Json
+  } catch {
+    return $null
+  }
+}
+
+function Wait-ApiReady {
+  param(
+    [int]$ProcessId,
+    [int]$Port,
+    [int]$TimeoutSec = 180
+  )
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    $proc = Get-ProcessById $ProcessId
+    if ($null -eq $proc) {
+      return $null
+    }
+    $health = Get-HealthPayload $Port
+    if ($null -ne $health -and [string]$health.status -eq "ok") {
+      return $health
+    }
+    Start-Sleep -Seconds 2
+  }
+  return $null
+}
+
 function Show-Status {
   $config = Read-ApiConfig
   $port = Get-ConfigPort $config
@@ -103,6 +152,12 @@ function Show-Status {
   } else {
     Write-Host "Port listener: none"
   }
+  $health = Get-HealthPayload $port
+  if ($null -ne $health) {
+    Write-Host "Health: status=$($health.status), model=$($health.model), server=$($health.server)"
+  } else {
+    Write-Host "Health: unavailable"
+  }
 }
 
 function Start-ApiService {
@@ -110,7 +165,18 @@ function Start-ApiService {
   $port = Get-ConfigPort $config
   $existingPid = Get-ListeningProcessId $port
   if ($null -ne $existingPid) {
-    Write-Host "Port $port is already listening, pid=$existingPid. Service start skipped."
+    $existingProc = Get-ProcessById $existingPid
+    if (-not (Test-IsApiProcess $existingProc)) {
+      throw "Port $port is already occupied by a non-Tailect process, pid=$existingPid."
+    }
+    $health = Get-HealthPayload $port
+    if ($null -eq $health -or [string]$health.status -ne "ok") {
+      throw "Tailect API process is listening on port $port but /health is not ready, pid=$existingPid."
+    }
+    New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
+    Set-Content -LiteralPath $PidFile -Value ([string]$existingPid) -Encoding ASCII
+    Write-Host "Tailect ASR v1 API is already running, pid=$existingPid."
+    Write-Host "Health: status=$($health.status), model=$($health.model), server=$($health.server)"
     return
   }
   if (-not (Test-Path -LiteralPath $PythonExe)) {
@@ -125,20 +191,36 @@ function Start-ApiService {
   $args = @("-m", "tailect_asr.cli.api_v1", "--config", $ConfigPath)
   $proc = Start-Process -FilePath $PythonExe -ArgumentList $args -WorkingDirectory $RootDir -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
   Set-Content -LiteralPath $PidFile -Value ([string]$proc.Id) -Encoding ASCII
-  Write-Host "Started Tailect ASR v1 API, pid=$($proc.Id)"
+  Write-Host "Starting Tailect ASR v1 API, pid=$($proc.Id)"
   Write-Host "Config: $ConfigPath"
   Write-Host "Health: http://127.0.0.1:$port/health"
   Write-Host "Stdout: $stdout"
   Write-Host "Stderr: $stderr"
+  $health = Wait-ApiReady -ProcessId $proc.Id -Port $port
+  if ($null -eq $health) {
+    $running = Get-ProcessById $proc.Id
+    if ($null -ne $running) {
+      Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue
+    }
+    Set-Content -LiteralPath $PidFile -Value "" -Encoding ASCII
+    throw "Tailect ASR v1 API did not become ready within 180 seconds. Check stderr: $stderr"
+  }
+  Write-Host "Started Tailect ASR v1 API, pid=$($proc.Id)"
+  Write-Host "Ready: status=$($health.status), model=$($health.model), server=$($health.server)"
 }
 
 function Stop-ApiService {
   $proc = Get-ApiProcessFromPidFile
   if ($null -eq $proc) {
+    if (Test-Path -LiteralPath $PidFile) {
+      Set-Content -LiteralPath $PidFile -Value "" -Encoding ASCII
+    }
     Write-Host "No running API service process found from PID file."
     return
   }
-  Stop-Process -Id ([int]$proc.ProcessId)
+  Stop-Process -Id ([int]$proc.ProcessId) -ErrorAction Stop
+  Wait-Process -Id ([int]$proc.ProcessId) -Timeout 30 -ErrorAction SilentlyContinue
+  Set-Content -LiteralPath $PidFile -Value "" -Encoding ASCII
   Set-Content -LiteralPath $StopFile -Value ("stopped pid={0} at {1}" -f $proc.ProcessId, (Get-Date -Format "yyyy-MM-dd HH:mm:ss")) -Encoding UTF8
   Write-Host "Stopped Tailect ASR v1 API, pid=$($proc.ProcessId)"
 }

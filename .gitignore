@@ -50,6 +50,12 @@ prompt材料/**/.DS_Store
 spyware-translator/**/.DS_Store
 spyware-translator/**/__pycache__/
 spyware-translator/**/*.pyc
+spyware-translator/temp/**/*.log
+spyware-translator/temp/*_output/
+spyware-translator/temp/*-test/
+spyware-translator/temp/*.pid
+spyware-translator/local_helper/runtime/
+spyware-translator/temp/offline_client_package/
 
 # Keep the small Tailect launcher and the qwen_asr CLI source slice,
 # while excluding the huge WinPython runtime and model payloads above.

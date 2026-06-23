@@ -28,6 +28,12 @@ if not exist "%MODEL_ROOT%" (
   exit /b 1
 )
 
+set "MODEL_NAME=%~1"
+if defined MODEL_NAME (
+  set "ASR_PATH=%MODEL_ROOT%\%MODEL_NAME%"
+  goto VALIDATE_MODEL
+)
+
 set /a MODEL_COUNT=0
 for /d %%D in ("%MODEL_ROOT%\*") do (
   set /a MODEL_COUNT+=1
@@ -54,6 +60,7 @@ if not defined MODEL_CHOICE set "MODEL_CHOICE=1"
 set "ASR_PATH=!MODEL_PATH_%MODEL_CHOICE%!"
 set "MODEL_NAME=!MODEL_NAME_%MODEL_CHOICE%!"
 
+:VALIDATE_MODEL
 if not defined ASR_PATH (
   echo [错误] 你输入的编号无效：%MODEL_CHOICE%
   pause
@@ -73,8 +80,8 @@ echo.
 echo 当前模型：%MODEL_NAME%
 echo 启动中，请耐心等待模型加载...
 echo 识别完成后可直接在界面下载 SRT 字幕文件。
-echo 启动成功后，本机可访问: http://127.0.0.1:7867
-echo 局域网访问请使用: http://本机IP:7867
+echo Local URL: http://127.0.0.1:7867
+echo LAN URL: http://YOUR_IP:7867
 echo ======================================================
 
 python -m tailect_asr.cli.demo ^
@@ -82,6 +89,7 @@ python -m tailect_asr.cli.demo ^
   --aligner-checkpoint "%ALIGN_PATH%" ^
   --backend transformers ^
   --ip 0.0.0.0 --port 7867
+set "EXIT_CODE=%ERRORLEVEL%"
 
-endlocal
 pause
+endlocal & exit /b %EXIT_CODE%

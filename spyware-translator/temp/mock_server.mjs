@@ -10,6 +10,8 @@ const ROOT = path.resolve(__dirname, '../..');
 const PORT = Number(process.env.PORT || 37867);
 const AUDIO_PATH = path.join(ROOT, 'prompt材料/bian.wav');
 const USER_SCRIPT_PATH = path.join(ROOT, 'spyware-translator/spyware-translator.user.js');
+const localCsvStore = new Map();
+const modelCsvStore = new Map();
 
 const MOCK_TEXT = '滴滴出行来电,喂你好,滴滴出行网约车送车点发你电话,对对对,好的我马上过去';
 const MOCK_SRT = `1
@@ -54,6 +56,89 @@ const server = createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/spyfile/audiostream.wav') {
       return sendAudio(req, res);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/mock-local/local/health') {
+      return sendJson(res, {
+        code: 200,
+        status: 'ok',
+        service: 'fanyin-local-csv-helper',
+        version: 'mock',
+        primary_ip: '12.33.114.183',
+        ips: ['12.33.114.183'],
+        output_dir: 'C:\\fanyin_output',
+      });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/mock-local/local/ip') {
+      return sendJson(res, { code: 200, primary_ip: '12.33.114.183', ips: ['12.33.114.183'] });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/mock-local/local/csv/status') {
+      return sendJson(res, csvStatus(localCsvStore, url.searchParams.get('filename') || url.searchParams.get('csv_filename') || ''));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/mock-local/local/csv') {
+      const status = csvStatus(localCsvStore, url.searchParams.get('filename') || url.searchParams.get('csv_filename') || '');
+      status.csv_text = localCsvStore.get(status.csv_filename) || '';
+      return sendJson(res, status);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/mock-local/local/csv/save') {
+      const body = await readJson(req);
+      const filename = safeCsvName(body.csv_filename || body.filename || 'mock.csv');
+      localCsvStore.set(filename, String(body.csv_text || ''));
+      return sendJson(res, csvStatus(localCsvStore, filename, { status: 'saved' }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/mock-local/local/csv/open-path') {
+      const body = await readJson(req);
+      const filename = safeCsvName(body.csv_filename || body.filename || 'mock.csv');
+      return sendJson(res, { code: localCsvStore.has(filename) ? 200 : 404, status: localCsvStore.has(filename) ? 'opened' : 'missing', path: `C:\\fanyin_output\\${filename}` });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/mock-local/local/feedback') {
+      await consumeRequest(req);
+      return sendJson(res, { code: 200, status: 'skipped', feedback_history_written: false });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/mock-v1/v1/audiototext') {
+      await consumeRequest(req);
+      const diarize = ['1', 'true', 'yes', 'on'].includes(String(url.searchParams.get('diarize') || '').toLowerCase());
+      return sendJson(res, {
+        code: 200,
+        language: 'zh',
+        data: mockRows(diarize),
+        file_name: 'mock.wav',
+        message: '',
+        uuid: `mock-${Date.now()}`,
+      });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/mock-v1/health') {
+      return sendJson(res, { code: 200, status: 'ok', service: 'tailect-asr-v1-mock' });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/mock-v1/translator/csv/status') {
+      return sendJson(res, csvStatus(modelCsvStore, url.searchParams.get('filename') || url.searchParams.get('csv_filename') || ''));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/mock-v1/translator/csv') {
+      const status = csvStatus(modelCsvStore, url.searchParams.get('filename') || url.searchParams.get('csv_filename') || '');
+      status.csv_text = modelCsvStore.get(status.csv_filename) || '';
+      return sendJson(res, status);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/mock-v1/translator/csv') {
+      const body = await readJson(req);
+      const filename = safeCsvName(body.csv_filename || body.filename || 'mock.csv');
+      modelCsvStore.set(filename, String(body.csv_text || ''));
+      return sendJson(res, { ...csvStatus(modelCsvStore, filename), status: 'saved', server_revision: Date.now(), server_version_id: `mock-version-${Date.now()}` });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/mock-v1/translator/feedback') {
+      await consumeRequest(req);
+      return sendJson(res, { code: 200, status: 'saved' });
     }
 
     if (req.method === 'GET' && url.pathname === '/mock-gradio/config') {
@@ -131,7 +216,8 @@ function renderPage() {
   <title>Spyware Translator Mock</title>
   <script>
     window.__TAILECT_ASR_TRANSLATOR_CONFIG__ = {
-      modelBaseUrl: location.origin + '/mock-gradio',
+      modelBaseUrl: location.origin + '/mock-v1',
+      localHelperUrl: location.origin + '/mock-local',
       debug: true
     };
   </script>
@@ -224,7 +310,8 @@ function renderVxPage() {
   <title>VX Translator Mock</title>
   <script>
     window.__TAILECT_ASR_TRANSLATOR_CONFIG__ = {
-      modelBaseUrl: location.origin + '/mock-gradio',
+      modelBaseUrl: location.origin + '/mock-v1',
+      localHelperUrl: location.origin + '/mock-local',
       debug: true
     };
   </script>
@@ -302,25 +389,22 @@ function renderVxPage() {
 }
 
 function renderGridPage() {
-  const rowCells = [
-    '1',
-    '001专案',
-    '目标',
-    '12312312311(xxx)',
-    '8613213213222(联通时科北京信息技术有限公司总部[来源于机主查询])',
-    '主叫',
-    '34',
-    '2026-01-01 16:30:15',
-    '已读',
-    '管理员,AI',
-    '管理员',
-    '目标与另一方通过滴滴出行软件沟通位置和交通情况。目标提到xxxx。',
-  ];
-  const cells = rowCells.map((text, index) => {
-    const left = [0, 60, 200, 300, 420, 577, 653, 713, 857, 957, 1038, 1119][index] || (1200 + index * 80);
-    const width = [60, 140, 100, 120, 157, 76, 60, 144, 100, 81, 81, 220][index] || 100;
-    return `<div class="wj-cell wj-state-multi-selected" role="gridcell" aria-selected="true" style="left:${left}px;top:0;width:${width}px;height:28px"><div>${escapeHtml(text)}</div></div>`;
+  const headers = ['序号', '案件名称', '对象名称', '侦控号码', '对方号码', '主被叫', '预估时长(秒)', '通话开始时间', '打标情况', '操作人', '最近操作人员', '翻听摘要'];
+  const lefts = [0, 60, 200, 300, 420, 577, 653, 713, 857, 957, 1038, 1119];
+  const widths = [60, 140, 100, 120, 157, 76, 60, 144, 100, 81, 81, 220];
+  const makeCells = (values, header) => values.map((text, index) => {
+    const role = header ? 'columnheader' : 'gridcell';
+    const className = header ? 'wj-cell wj-header' : 'wj-cell';
+    return `<div class="${className}" role="${role}" style="left:${lefts[index]}px;top:0;width:${widths[index]}px;height:28px"><div>${escapeHtml(text)}</div></div>`;
   }).join('');
+  const firstRow = makeCells([
+    '1', '001专案', '目标A', '12312312311(xxx)', '8613213213222(联通时科北京信息技术有限公司总部[来源于机主查询])',
+    '主叫', '34', '2026-01-01 16:30:15', '未读', '管理员,AI', '管理员', '可从行数据静默取得音频路径。',
+  ], false);
+  const secondRow = makeCells([
+    '2', '002专案', '目标B', '12312312322(yyy)', '8613912345678', '被叫', '18', '2026-01-01 16:32:20',
+    '未读', '管理员,AI', '管理员', '点击等待后由用户手动打开音频详情。',
+  ], false);
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -328,20 +412,72 @@ function renderGridPage() {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Grid Translator Mock</title>
   <script>
+    const mockParams = new URLSearchParams(location.search);
+    window.__MOCK_SAVED_FILES__ = [];
+    const mockSaveFilePicker = async function (options) {
+      const saved = { name: options && options.suggestedName || 'mock.csv', text: '', closed: false };
+      window.__MOCK_SAVED_FILES__.push(saved);
+      return {
+        createWritable: async function () {
+          return {
+            write: async function (value) {
+              saved.text = value instanceof Blob ? await value.text() : String(value || '');
+            },
+            close: async function () {
+              saved.closed = true;
+              const result = document.getElementById('mock-save-result');
+              if (result) {
+                result.dataset.name = saved.name;
+                result.dataset.closed = 'true';
+                result.dataset.textLength = String(saved.text.length);
+                result.dataset.hasChineseHeader = String(saved.text.includes('记录键'));
+                result.dataset.hasTranscript = String(saved.text.includes('滴滴出行'));
+              }
+            }
+          };
+        }
+      };
+    };
+    const mockBrowserDownload = async function (value, filename) {
+      const result = document.getElementById('mock-save-result');
+      if (!result) return;
+      const text = value instanceof Blob ? await value.text() : String(value || '');
+      result.dataset.name = filename || '';
+      result.dataset.closed = 'download';
+      result.dataset.textLength = String(text.length);
+      result.dataset.hasChineseHeader = String(text.includes('记录键'));
+      result.dataset.hasTranscript = String(text.includes('滴滴出行'));
+    };
     window.__TAILECT_ASR_TRANSLATOR_CONFIG__ = {
-      modelBaseUrl: location.origin + '/mock-gradio',
-      debug: true
+      modelBaseUrl: location.origin + '/mock-v1',
+      localHelperUrl: mockParams.get('helper') === 'off' ? 'http://127.0.0.1:1' : location.origin + '/mock-local',
+      debug: true,
+      __testSaveFilePicker: mockParams.get('savePicker') === 'mock' ? mockSaveFilePicker : null,
+      __disableNativeSaveFilePicker: mockParams.get('savePicker') === 'off',
+      __testBrowserDownload: mockParams.get('savePicker') === 'off' ? mockBrowserDownload : null
+    };
+    window.wijmo = {
+      Control: {
+        getControl: function () {
+          return window.__MOCK_GRID_CONTROL__ || null;
+        }
+      }
     };
   </script>
   <script src="/spyware-translator.user.js"></script>
   <style>
     body{margin:0;background:#f4f7fb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#172033}
     .page{padding:20px}
-    .rc-table{height:150px;border:1px solid #dbe4ee;background:#fff;overflow:auto}
-    .wj-control{position:relative;height:100%;min-width:1500px}
-    .wj-cells{position:relative;width:1500px;height:28px;margin-top:28px}
-    .wj-row{position:relative;height:28px;cursor:pointer}
+    .page{padding-right:500px}
+    .rc-table{height:150px;border:1px solid #dbe4ee;background:#fff;overflow:hidden}
+    .wj-control{position:relative;height:100%;width:100%}
+    .wj-root{position:absolute;inset:0;overflow:auto}
+    .wj-header-viewport{position:sticky;left:0;top:0;z-index:3;width:100%;height:28px;overflow:hidden;background:#f8fafc}
+    .wj-colheaders{position:absolute;left:0;top:0;width:1339px;height:28px}
+    .wj-cells{position:absolute;left:0;top:28px;width:1339px;height:56px}
+    .wj-row{position:absolute;left:0;width:1339px;height:28px;cursor:pointer}
     .wj-cell{position:absolute;box-sizing:border-box;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:#475569;background:#fff}
+    .wj-header{font-weight:600;color:#334155;background:#f8fafc}
     .wj-row[aria-selected="true"] .wj-cell{background:#eff6ff}
     .mock-detail{display:none;margin-top:18px;grid-template-columns:1fr 1fr;gap:14px}
     .mock-detail.open{display:grid}
@@ -359,12 +495,18 @@ function renderGridPage() {
 <body>
   <main class="page">
     <h2>列表弹窗语音场景 mock</h2>
+    <div id="mock-save-result" hidden></div>
     <div class="rc-table">
       <div class="wj-control wj-content wj-flexgrid">
-        <div wj-part="root">
-          <div wj-part="cells" class="wj-cells" role="grid">
-            <div class="wj-row" role="row" aria-selected="true" id="mock-grid-row">${cells}</div>
+        <div wj-part="root" class="wj-root">
+          <div wj-part="ch" class="wj-header-viewport">
+            <div wj-part="chcells" class="wj-colheaders"><div class="wj-row" role="row" style="top:0">${makeCells(headers, true)}</div></div>
           </div>
+          <div wj-part="cells" class="wj-cells" role="grid">
+            <div class="wj-row" role="row" aria-selected="false" id="mock-grid-row-silent" style="top:0">${firstRow}</div>
+            <div class="wj-row" role="row" aria-selected="false" id="mock-grid-row-fallback" style="top:28px">${secondRow}</div>
+          </div>
+          <div wj-part="sz" style="position:relative;visibility:hidden;width:1339px;height:84px" aria-hidden="true"></div>
         </div>
       </div>
     </div>
@@ -380,16 +522,60 @@ function renderGridPage() {
             <wave></wave>
           </div>
         </div>
-        <audio preload="auto" controls src="/spyfile/audiostream.wav?targetfile=grid-call-001.wav&index=0"></audio>
+        <div id="mock-detail-audio"></div>
       </div>
-      <div class="transcript">点击悬浮窗里的定位按钮，应高亮左上方列表项。</div>
+      <div class="transcript">第二行用于验证先进入等待状态，再由用户手动打开音频详情。</div>
     </section>
   </main>
   <script>
-    const row = document.getElementById('mock-grid-row');
-    row.addEventListener('click', () => {
-      row.setAttribute('aria-selected', 'true');
-      document.getElementById('mock-detail').classList.add('open');
+    const rows = Array.from(document.querySelectorAll('[wj-part="cells"] > .wj-row'));
+    const hiddenAudioHeader = '语音文件存放的路径';
+    window.__MOCK_GRID_CONTROL__ = {
+      rows: [
+        { dataItem: {
+          '序号': '1', '案件名称': '001专案', '对象名称': '目标A', '侦控号码': '12312312311(xxx)',
+          '对方号码': '8613213213222(联通时科北京信息技术有限公司总部[来源于机主查询])',
+          '主被叫': '主叫', '预估时长(秒)': '34', '通话开始时间': '2026-01-01 16:30:15',
+          [hiddenAudioHeader]: 'grid-call-001.wav'
+        } },
+        { dataItem: {
+          '序号': '2', '案件名称': '002专案', '对象名称': '目标B', '侦控号码': '12312312322(yyy)',
+          '对方号码': '8613912345678', '主被叫': '被叫', '预估时长(秒)': '18',
+          '通话开始时间': '2026-01-01 16:32:20', [hiddenAudioHeader]: ''
+        } }
+      ],
+      columns: ${JSON.stringify(headers.map((header) => ({ header, binding: header })).concat([{ header: '语音文件存放的路径', binding: '语音文件存放的路径' }]))},
+      selection: { row: 0 },
+      hitTest: function (x, y) {
+        const index = rows.findIndex((row) => {
+          const rect = row.getBoundingClientRect();
+          return y >= rect.top && y <= rect.bottom;
+        });
+        return { row: index };
+      },
+      getCellData: function (rowIndex, columnIndex) {
+        const column = this.columns[columnIndex];
+        return this.rows[rowIndex] && column ? this.rows[rowIndex].dataItem[column.binding] : '';
+      }
+    };
+    rows.forEach((row) => row.addEventListener('click', () => {
+      window.__MOCK_GRID_CONTROL__.selection.row = rows.indexOf(row);
+      rows.forEach((item) => item.setAttribute('aria-selected', String(item === row)));
+    }));
+    let fallbackOpenCount = 0;
+    const fallbackCaseCell = rows[1].children[1];
+    fallbackCaseCell.addEventListener('dblclick', () => {
+      const row = rows[1];
+      window.__MOCK_GRID_CONTROL__.selection.row = 1;
+      rows.forEach((item) => item.setAttribute('aria-selected', String(item === row)));
+      const detail = document.getElementById('mock-detail');
+      const audioHost = document.getElementById('mock-detail-audio');
+      detail.classList.add('open');
+      fallbackOpenCount += 1;
+      const targetfile = 'grid-call-002-open-' + fallbackOpenCount + '.wav';
+      const src = '/spyfile/audiostream.wav?targetfile=' + encodeURIComponent(targetfile) + '&index=0';
+      audioHost.innerHTML = '<audio preload="auto" controls src="' + src + '"></audio>';
+      fetch(src).catch(() => {});
     });
   </script>
 </body>
@@ -405,6 +591,19 @@ function escapeHtml(value) {
 }
 
 async function sendAudio(req, res) {
+  const url = new URL(req.url || '/', `http://${req.headers.host || '127.0.0.1'}`);
+  const targetfile = url.searchParams.get('targetfile') || '';
+  const index = Number(url.searchParams.get('index') || '0') || 0;
+  if (targetfile === 'grid-call-001.wav' && index > 5) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('slice not found');
+    return;
+  }
+  if (targetfile !== 'grid-call-001.wav' && index > 0) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('slice not found');
+    return;
+  }
   const bytes = await readFile(AUDIO_PATH);
   const range = req.headers.range;
   if (range) {
@@ -436,13 +635,33 @@ function sendHtml(res, html) {
 }
 
 function sendText(res, text, type) {
-  res.writeHead(200, { 'Content-Type': type });
+  res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
   res.end(text);
 }
 
 function sendJson(res, value) {
-  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(value));
+}
+
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      const text = Buffer.concat(chunks).toString('utf8');
+      if (!text.trim()) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(text));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on('error', reject);
+  });
 }
 
 function consumeRequest(req) {
@@ -451,4 +670,39 @@ function consumeRequest(req) {
     req.on('end', resolve);
     req.on('error', reject);
   });
+}
+
+function safeCsvName(value) {
+  const text = String(value || 'mock.csv').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'mock.csv';
+  const stem = text.toLowerCase().endsWith('.csv') ? text.slice(0, -4) : text;
+  return `${(stem || 'mock').slice(0, 184)}.csv`;
+}
+
+function csvStatus(store, filename, extra = {}) {
+  const csvName = safeCsvName(filename);
+  const csvText = store.get(csvName) || '';
+  const rowCount = Math.max(0, csvText.split(/\r?\n/).filter((line) => line.trim()).length - 1);
+  return {
+    code: 200,
+    csv_filename: csvName,
+    path: `C:\\fanyin_output\\${csvName}`,
+    exists: store.has(csvName),
+    empty: rowCount <= 0,
+    row_count: rowCount,
+    content_hash: csvText ? `mock:${csvText.length}` : '',
+    ...extra,
+  };
+}
+
+function mockRows(diarize = false) {
+  const speakers = !diarize
+    ? ['1', '1', '1', '1', '1']
+    : ['0', '1', '0', '1', '0'];
+  return [
+    { lid: speakers[0], text: '滴滴出行来电,', begin: 1280, end: 2240 },
+    { lid: speakers[1], text: '喂你好,', begin: 3120, end: 3600 },
+    { lid: speakers[2], text: '滴滴出行网约车送车点发你电话,', begin: 3760, end: 8080 },
+    { lid: speakers[3], text: '对对对,', begin: 8080, end: 8960 },
+    { lid: speakers[4], text: '好的我马上过去', begin: 10080, end: 11280 },
+  ];
 }

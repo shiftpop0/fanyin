@@ -70,13 +70,13 @@ if not exist "%MODEL_ROOT%\%MODEL_NAME%" (
 
 echo.
 echo 当前模型：%MODEL_NAME%
-echo API 地址: http://127.0.0.1:%PORT%/v1/audiototext?model=%MODEL_NAME%
-echo 健康检查: http://127.0.0.1:%PORT%/health
-echo 运行模式: uvicorn 单进程离线服务，上传上限 512MB，请求队列等待 600 秒，单客户端每分钟 60 次
-if defined TAILECT_API_KEY echo 鉴权: 已启用 TAILECT_API_KEY
-if not defined TAILECT_API_KEY echo 鉴权: 未设置 TAILECT_API_KEY，本机联调模式不启用 API Key
-echo 日志目录: %ROOT_DIR%outputs\logs
-echo 局域网访问请使用: http://本机IP:%PORT%
+echo API URL: http://127.0.0.1:%PORT%/v1/audiototext?model=%MODEL_NAME%
+echo Health URL: http://127.0.0.1:%PORT%/health
+echo Runtime: uvicorn, single process, offline mode, max upload 512MB, queue timeout 600s, rate limit 60/min
+if defined TAILECT_API_KEY echo Auth: enabled by TAILECT_API_KEY
+if not defined TAILECT_API_KEY echo Auth: disabled for local integration
+echo Log directory: %ROOT_DIR%outputs\logs
+echo LAN URL: http://YOUR_IP:%PORT%
 echo ======================================================
 
 python -m tailect_asr.cli.api_v1 ^
@@ -90,6 +90,7 @@ python -m tailect_asr.cli.api_v1 ^
   --rate-limit-per-minute 60 ^
   --diarize ^
   --diarization-fallback
+set "EXIT_CODE=%ERRORLEVEL%"
 
-endlocal
 pause
+endlocal & exit /b %EXIT_CODE%
