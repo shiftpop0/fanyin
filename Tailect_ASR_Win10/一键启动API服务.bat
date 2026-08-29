@@ -73,6 +73,9 @@ echo 当前模型：%MODEL_NAME%
 echo API URL: http://127.0.0.1:%PORT%/v1/audiototext?model=%MODEL_NAME%
 echo Health URL: http://127.0.0.1:%PORT%/health
 echo Runtime: uvicorn, single process, offline mode, max upload 512MB, queue timeout 600s, rate limit 60/min
+echo Audio URL: enabled, timeout 30s, max redirects 5
+if defined TAILECT_AUDIO_URL_ALLOW_HOSTS echo Audio URL allow hosts: %TAILECT_AUDIO_URL_ALLOW_HOSTS%
+if not defined TAILECT_AUDIO_URL_ALLOW_HOSTS echo Audio URL allow hosts: unrestricted HTTP/HTTPS
 if defined TAILECT_API_KEY echo Auth: enabled by TAILECT_API_KEY
 if not defined TAILECT_API_KEY echo Auth: disabled for local integration
 echo Log directory: %ROOT_DIR%outputs\logs
