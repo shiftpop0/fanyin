@@ -59,6 +59,7 @@ from core.model_loader import (
     load_diarization_model,
     load_forced_aligner,
     load_punctuation_model,
+    install_numpy_compat_shim,
     install_torchaudio_compat_shim,
 )
 from core.audio_processor import safe_remove, clip_audio, format_wall_time
@@ -98,7 +99,7 @@ __all__ = [
     "CONFIG", "get_config", "logger",
     "resolve_device", "resolve_dtype",
     "load_asr_model", "load_diarization_model", "load_forced_aligner",
-    "load_punctuation_model", "install_torchaudio_compat_shim",
+    "load_punctuation_model", "install_numpy_compat_shim", "install_torchaudio_compat_shim",
     "save_upload_file", "safe_remove", "clip_audio", "format_wall_time",
     "ASRWrapper", "DiarizationWrapper", "ForcedAlignWrapper",
     "PunctuationRestorer", "UnifiedService", "StreamingManager",

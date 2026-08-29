@@ -118,12 +118,31 @@ class TestModelLoader(unittest.TestCase):
 
     def test_import_model_loader(self):
         from core.model_loader import (
+            install_numpy_compat_shim,
             install_torchaudio_compat_shim,
             patch_mistral_tokenizer,
         )
 
+        self.assertTrue(callable(install_numpy_compat_shim))
         self.assertTrue(callable(install_torchaudio_compat_shim))
         self.assertTrue(callable(patch_mistral_tokenizer))
+
+    def test_install_numpy_compat_shim(self):
+        import numpy as np
+        from core.model_loader import install_numpy_compat_shim
+
+        original_present = "NaN" in np.__dict__
+        original_value = np.__dict__.get("NaN")
+        try:
+            np.__dict__.pop("NaN", None)
+            install_numpy_compat_shim()
+            self.assertIn("NaN", np.__dict__)
+            self.assertTrue(np.isnan(np.__dict__["NaN"]))
+        finally:
+            if original_present:
+                np.__dict__["NaN"] = original_value
+            else:
+                np.__dict__.pop("NaN", None)
 
     def test_install_torchaudio_compat_shim(self):
         from core.model_loader import install_torchaudio_compat_shim

@@ -1,5 +1,5 @@
 param(
-    [string]$PackageDate = "20260829-r6"
+    [string]$PackageDate = "20260829-r7"
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,6 +39,7 @@ foreach ($File in $CoreFiles) {
     "tailect/unified_asr_diarization_transformer_offline.py",
     "tailect/config/audio_url_allowlist.json.example",
     "tailect/tests/__init__.py",
+    "tailect/tests/test_core.py",
     "tailect/tests/test_v1_platform.py"
 ) | ForEach-Object { Copy-RepoFile -RelativePath $_ -DestinationRoot $PayloadRoot }
 
@@ -56,6 +57,7 @@ New-Item -ItemType Directory -Path $MigrationPayloadDestination -Force | Out-Nul
 @(
     "preflight_new4_1.sh",
     "acceptance_new4_1.sh",
+    "apply_r7_hotfix.sh",
     "rollback_to_old.sh"
 ) | ForEach-Object {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $_) -Destination $MigrationPayloadDestination
@@ -80,6 +82,7 @@ New-Item -ItemType Directory -Path $TopMigration -Force | Out-Null
     "prepare_release.sh",
     "preflight_new4_1.sh",
     "acceptance_new4_1.sh",
+    "apply_r7_hotfix.sh",
     "rollback_to_old.sh"
 ) | ForEach-Object {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $_) -Destination $TopMigration

@@ -18,6 +18,24 @@ from core.logger import logger
 # ===================================================================
 
 
+def install_numpy_compat_shim() -> None:
+    """恢复旧版 pyannote 依赖的 NumPy 别名。
+
+    NumPy 2.0 移除了 ``np.NaN``，而生产镜像内的 pyannote.audio
+    仍在类定义阶段引用该名称。别名与 ``np.nan`` 完全等价，
+    在导入 TargetDiarization 之前恢复它可避免修改离线镜像或
+    第三方包。
+    """
+    try:
+        import numpy as np
+    except Exception:
+        return
+
+    if "NaN" not in np.__dict__:
+        setattr(np, "NaN", np.nan)
+        logger.info("[NUMPY] Restored np.NaN compatibility alias for pyannote")
+
+
 def install_torchaudio_compat_shim() -> None:
     """兼容某些 torchaudio 版本缺少 API 的情况，避免 pyannote 导入失败。"""
     try:
@@ -229,6 +247,8 @@ def load_diarization_model(project_path: str, device: str) -> Any:
     if not os.path.isdir(project_path):
         raise RuntimeError(f"Invalid diarization project path: {project_path}")
 
+    # 兼容层必须在 TargetDiarization/pyannote 导入之前安装。
+    install_numpy_compat_shim()
     install_torchaudio_compat_shim()
 
     if project_path not in sys.path:

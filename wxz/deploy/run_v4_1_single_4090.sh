@@ -15,6 +15,8 @@ PLATFORM_CONTAINER="${PLATFORM_CONTAINER:-tailect-v41-platform}"
 MODEL_DIR="${MODEL_DIR:-${PROJECT_ROOT}/model}"
 LOG_DIR="${LOG_DIR:-${PROJECT_ROOT}/log}"
 ACTION="${1:-start}"
+REQUIRE_DIARIZATION="${REQUIRE_DIARIZATION:-1}"
+REQUIRE_FORCED_ALIGNER="${REQUIRE_FORCED_ALIGNER:-1}"
 
 container_exists() { docker ps -a --format '{{.Names}}' | grep -Fxq "$1"; }
 container_running() { docker ps --format '{{.Names}}' | grep -Fxq "$1"; }
@@ -91,6 +93,18 @@ for _ in $(seq 1 180); do
 done
 $ready || { echo "Model did not become ready; inspect $LOG_DIR/tailect_v41_model.log" >&2; exit 1; }
 
+model_health="$(curl -fsS http://127.0.0.1:6006/health)"
+if [[ "$REQUIRE_DIARIZATION" == "1" ]] && [[ "$model_health" != *'"diarization_ready":true'* ]]; then
+    echo "Model API started, but speaker diarization is unavailable: $model_health" >&2
+    echo "Inspect $LOG_DIR/tailect_v41_model.log" >&2
+    exit 1
+fi
+if [[ "$REQUIRE_FORCED_ALIGNER" == "1" ]] && [[ "$model_health" != *'"forced_aligner_ready":true'* ]]; then
+    echo "Model API started, but ForcedAligner is unavailable: $model_health" >&2
+    echo "Inspect $LOG_DIR/tailect_v41_model.log" >&2
+    exit 1
+fi
+
 if container_running "$PLATFORM_CONTAINER"; then
     echo "Platform container already running: $PLATFORM_CONTAINER"
 elif container_exists "$PLATFORM_CONTAINER"; then
@@ -104,5 +118,20 @@ else
         -v "${LOG_DIR}:/var/log/nginx" "$NGINX_IMAGE" >/dev/null
 fi
 
-curl -fsS http://127.0.0.1:8885/health >/dev/null
+echo "Waiting for platform gateway on port 8885..."
+platform_ready=false
+for _ in $(seq 1 30); do
+    if curl -fsS http://127.0.0.1:8885/health >/dev/null 2>&1; then
+        platform_ready=true
+        break
+    fi
+    sleep 2
+done
+if ! $platform_ready; then
+    echo "Platform gateway did not become ready." >&2
+    docker ps -a --filter "name=^/${PLATFORM_CONTAINER}$" \
+        --format 'container={{.Names}} status={{.Status}} ports={{.Ports}}' >&2 || true
+    docker logs --tail 100 "$PLATFORM_CONTAINER" >&2 || true
+    exit 1
+fi
 echo "Ready: generic API http://127.0.0.1:6006; platform API http://127.0.0.1:8885"

@@ -284,12 +284,25 @@ def health() -> Dict[str, Any]:
         STREAMING_MANAGER is not None
         and SESSION_MANAGER is not None
     )
+    diarization_ready = SERVICE is not None and SERVICE.diarization is not None
+    forced_aligner_ready = SERVICE is not None and SERVICE.forced_aligner is not None
+    punctuation_ready = (
+        SERVICE is not None
+        and SERVICE.punctuation is not None
+        and SERVICE.punctuation.model is not None
+    )
     return {
         "status": "ok",
         "model": str(CONFIG.get("model_alias", "Tailect_V4.1")),
         "server": "uvicorn",
         "cuda": bool(torch.cuda.is_available()),
         "service_ready": SERVICE is not None,
+        "diarization_ready": diarization_ready,
+        "diarization_error": (
+            str(SERVICE.diarization_init_error or "") if SERVICE is not None else "service unavailable"
+        ),
+        "forced_aligner_ready": forced_aligner_ready,
+        "punctuation_ready": punctuation_ready,
         "streaming_ready": stream_ready,
         "active_streaming_sessions": (
             SESSION_MANAGER.get_active_count() if SESSION_MANAGER else 0
