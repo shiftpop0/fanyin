@@ -5,11 +5,11 @@ import path from 'node:path';
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8885';
 const DEFAULT_MODEL = 'Tailect_V4.1';
-const DEFAULT_AUDIO_PATH = path.resolve('prompt材料/bian.wav');
+const audioArgument = process.argv[4] || process.env.TAILECT_TEST_AUDIO || '';
 
 const baseUrl = normalizeBaseUrl(process.argv[2] || DEFAULT_BASE_URL);
 const model = process.argv[3] || DEFAULT_MODEL;
-const audioPath = path.resolve(process.argv[4] || DEFAULT_AUDIO_PATH);
+const audioPath = audioArgument ? path.resolve(audioArgument) : '';
 
 main().catch((error) => {
   console.error('[v1-probe] failed:', error && error.stack ? error.stack : error);
@@ -17,6 +17,9 @@ main().catch((error) => {
 });
 
 async function main() {
+  if (!audioPath) {
+    throw new Error('missing test audio path; usage: node tailect_v41_probe.mjs <baseUrl> <model> <audio.wav>');
+  }
   console.log(`[v1-probe] base: ${baseUrl}`);
   console.log(`[v1-probe] model: ${model}`);
   console.log(`[v1-probe] audio: ${audioPath}`);

@@ -5,7 +5,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPOSITORY_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+PROJECT_ROOT="${REPOSITORY_ROOT}/tailect"
 IMAGE="${IMAGE:-tailect-asr-qwen3-asr:offline-salvaged-20260506}"
 NGINX_IMAGE="${NGINX_IMAGE:-nginx:alpine}"
 GPU_ID="${GPU_ID:-0}"

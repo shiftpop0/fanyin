@@ -61,8 +61,8 @@ export TAILECT_API_KEY='现场密钥'
 先确认 `GPU_ID` 是 4090 在宿主机中的编号，再运行：
 
 ```bash
-cd /path/to/tailect
-GPU_ID=0 bash script/run_v4_1_single_4090.sh start
+cd /path/to/fanyin
+GPU_ID=0 bash wxz/deploy/run_v4_1_single_4090.sh start
 ```
 
 可覆盖离线镜像名：
@@ -71,7 +71,7 @@ GPU_ID=0 bash script/run_v4_1_single_4090.sh start
 IMAGE=tailect-asr-qwen3-asr:offline-salvaged-20260506 \
 NGINX_IMAGE=nginx:alpine \
 GPU_ID=0 \
-bash script/run_v4_1_single_4090.sh start
+bash wxz/deploy/run_v4_1_single_4090.sh start
 ```
 
 脚本有以下保护：
@@ -84,8 +84,8 @@ bash script/run_v4_1_single_4090.sh start
 状态与停止：
 
 ```bash
-bash script/run_v4_1_single_4090.sh status
-bash script/run_v4_1_single_4090.sh stop
+bash wxz/deploy/run_v4_1_single_4090.sh status
+bash wxz/deploy/run_v4_1_single_4090.sh stop
 ```
 
 健康检查：
@@ -244,7 +244,7 @@ Content-Type: application/json
 
 ## 6. 油猴脚本
 
-V4.1 专用文件位于仓库根目录 `spyware-translator-v4.1/`。它使用独立 localStorage、唯一 DOM ID、唯一模型选项，不修改原 `spyware-translator/`。
+V4.1 专用文件位于仓库根目录 `spyware-translator-v4.1/`。它使用独立 localStorage、唯一 DOM ID 和唯一模型选项，不依赖旧项目目录。
 
 默认设置：
 
@@ -266,14 +266,14 @@ PYTHONPATH=. python -m unittest tests.test_v1_platform -v
 油猴静态检查：
 
 ```bash
-node ../spyware-translator-v4.1/tests/userscript_static_test.mjs
+node spyware-translator-v4.1/tests/userscript_static_test.mjs
 ```
 
 模型启动后的真实合同探测：
 
 ```bash
-node ../spyware-translator-v4.1/tests/tailect_v41_probe.mjs \
-  http://127.0.0.1:8885 Tailect_V4.1 ../prompt材料/bian.wav
+node spyware-translator-v4.1/tests/tailect_v41_probe.mjs \
+  http://127.0.0.1:8885 Tailect_V4.1 /path/to/sample.wav
 ```
 
 这台开发机未在实施过程中启动模型或占用端口；真实 GPU 加载、显存峰值、识别准确率和两机浏览器联调必须在离线生产环境按上述命令验收。

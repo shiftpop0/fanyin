@@ -22,13 +22,13 @@
 
 ### 2.1 Git 与目录现状
 
-- `C:\program5\fanyin4.1` 和其子目录 `tailect` 均不是 Git 仓库。
+- 当前工作区已经接入目标 Git 仓库，当前实现位于 `new4.1` 分支。
 - 当前根目录主要包含：
   - `tailect/`：源码、模型、测试及部署脚本。
   - `tailect-asr-qwen3-asr-full-diar-offline.tar`：约 14.9 GB，绝不能提交 Git。
   - `AGENTS.MD`：本工作区操作规则。
 - 目标远端当前只有 `main` 分支；远端 `new4.1` 尚不存在。
-- 参考旧仓库 `C:\program5\fanyin` 当前位于提交 `bb3701b`，与 `origin/main` 一致，但参考指南本身是该旧工作区中的未跟踪文件；后续不得修改或误提交旧工作区的未跟踪内容。
+- 旧项目只在调研阶段用于理解平台合同和油猴行为，完成复刻后不复制到当前分支。
 - 推荐在当前根目录建立 Git，并以 `origin/main` 为基线创建 `new4.1`，不能建立无历史的 orphan 分支。远端旧实现只作为可复用代码与历史来源；`new4.1` 的实际产品范围只有当前 `Tailect_V4.1` 一个模型，不设计多模型切换或新旧模型并存。
 
 ### 2.2 当前模型服务能力
@@ -231,7 +231,7 @@ GPU        -> 单张 4090
 
 ### 阶段 E：油猴脚本与本机助手
 
-在独立的新目录 `spyware-translator-v4.1/` 中，以 `origin/main` 的 `spyware-translator/spyware-translator.user.js` 0.4.4 为参考基线；不直接修改或混用原 `spyware-translator/` 目录。保留以下能力：
+在独立的新目录 `spyware-translator-v4.1/` 中实现当前客户端。旧脚本只在设计阶段作为参考，完成复刻后不复制、不保留旧项目目录。当前客户端保留以下能力：
 
 - fetch、XHR、DOM、Performance 四路音频捕获。
 - `index=0..N` 切片探测、连续失败阈值、WAV 合并与超 10 分钟分 part。
@@ -316,11 +316,9 @@ V4.1 必改项：
 - 新增 `tailect/core/translator_store.py`
 - 新增 `tailect/core/v1_router.py`
 - 新增 `tailect/config/audio_url_allowlist.json.example`
-- 新增 `tailect/script/nginx_platform_8885.conf`
-- 新增/调整单 4090 启停、状态和 preflight 脚本，明确 6006 模型服务与 8885 平台入口
-- 新增 `tailect/tests/test_v1_contract.py`
-- 新增 `tailect/tests/test_audio_input.py`
-- 新增 `tailect/tests/test_translator_store.py`
+- 新增 `wxz/deploy/nginx_platform_8885.conf`
+- 新增 `wxz/deploy/run_v4_1_single_4090.sh`，明确 6006 模型服务与 8885 平台入口
+- 新增 `tailect/tests/test_v1_platform.py`
 - 新增 v1 probe/preflight/部署配置与文档
 
 从 `origin/main` 参考复用，但写入独立目录 `spyware-translator-v4.1/`：
@@ -328,14 +326,13 @@ V4.1 必改项：
 - `spyware-translator-v4.1/spyware-translator-v4.1.user.js`
 - `spyware-translator-v4.1/local_helper/local_csv_helper.mjs`
 - `spyware-translator-v4.1/local_helper/build_offline_client.ps1`
-- `spyware-translator-v4.1/local_helper/README.md`
-- `spyware-translator-v4.1/tests/mock_server.mjs`
-- `spyware-translator-v4.1/tools/tailect_v1_probe.mjs`
+- `spyware-translator-v4.1/tests/userscript_static_test.mjs`
+- `spyware-translator-v4.1/tests/tailect_v41_probe.mjs`
 
 仓库根目录：
 
 - 新增/修改 `.gitignore`
-- 保留本计划书
+- `wxz/docs/` 保留本计划书、部署说明、油猴说明和本机助手说明
 - 视需要增加源码/第三方来源说明和许可证清单
 
 ## 6. 已确认决策与新增生产建议

@@ -62,7 +62,11 @@ if (-not $startupBat) {
     throw "The local helper startup BAT was not found."
 }
 Copy-Item -LiteralPath $startupBat.FullName -Destination $payloadHelperDir
-Copy-Item -LiteralPath (Join-Path $helperDir "README.md") -Destination $payloadHelperDir
+$helperDocumentation = Join-Path $translatorDir "..\wxz\docs\本机CSV助手说明.md"
+if (-not (Test-Path -LiteralPath $helperDocumentation)) {
+    throw "Local helper documentation was not found: $helperDocumentation"
+}
+Copy-Item -LiteralPath $helperDocumentation -Destination (Join-Path $payloadHelperDir "README.md")
 Copy-Item -LiteralPath $NodeExe -Destination (Join-Path $runtimeDir "node.exe")
 
 $licenseCandidates = @(

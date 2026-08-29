@@ -62,7 +62,7 @@
 | **油猴 CSV 同步** | `GET/POST /translator/*` | CSV 读取、状态、保存与人工修正 |
 | **健康检查** | `GET /health` | 服务状态监测 |
 
-生产部署保留两个端口角色：6006 是当前 FastAPI 通用接口；8885 由离线 Nginx 仅代理 `/health`、`/v1/audiototext` 和 `/translator/*` 到同一 6006 进程，因此显存中只加载一份模型。单张 4090 的安全启动方式、接口合同、URL 白名单和油猴联调详见 [API_V4.1_离线接口与部署.md](API_V4.1_离线接口与部署.md)。
+生产部署保留两个端口角色：6006 是当前 FastAPI 通用接口；8885 由离线 Nginx 仅代理 `/health`、`/v1/audiototext` 和 `/translator/*` 到同一 6006 进程，因此显存中只加载一份模型。单张 4090 的安全启动方式、接口合同、URL 白名单和油猴联调详见 [Tailect_V4.1 离线接口与部署](../wxz/docs/Tailect_V4.1离线接口与部署.md)。
 
 ---
 

@@ -11,16 +11,6 @@ __pycache__/
 **/.ipynb_checkpoints/
 node_modules/
 
-# Local runtime, models, generated outputs, and binary dependencies
-Tailect_ASR_Win10/models/
-Tailect_ASR_Win10/bin/
-Tailect_ASR_Win10/VC运行库/
-Tailect_ASR_Win10/outputs/
-Tailect_ASR_Win10/WPy64-312101/
-
-# Temporary probes, mock servers, update packages, and local artifacts
-spyware-translator/temp/
-
 # Large or local-only artifacts
 *.tar
 *.wav
@@ -53,68 +43,11 @@ spyware-translator/temp/
 # Agent/user-local working materials
 /AGENTS.MD
 /del/
-/wxz/
 /spyware-translator-v4.1/temp/
 /spyware-translator-v4.1/**/runtime/
+/wxz/temp/
 
 # Environment and logs
 .env
 .env.*
 *.log
-
-# Keep the project materials requested for GitHub.
-!prompt材料/
-!prompt材料/**
-prompt材料/**/.DS_Store
-
-!spyware-translator/
-!spyware-translator/**
-spyware-translator/**/.DS_Store
-spyware-translator/**/__pycache__/
-spyware-translator/**/*.pyc
-spyware-translator/temp/**/*.log
-spyware-translator/temp/*_output/
-spyware-translator/temp/*-test/
-spyware-translator/temp/*.pid
-spyware-translator/local_helper/runtime/
-spyware-translator/temp/offline_client_package/
-
-# Keep the small Tailect launcher and the qwen_asr CLI source slice,
-# while excluding the huge WinPython runtime and model payloads above.
-!Tailect_ASR_Win10/
-!Tailect_ASR_Win10/一键启动WebUI.bat
-!Tailect_ASR_Win10/一键启动API服务.bat
-!Tailect_ASR_Win10/一键模型自检.bat
-!Tailect_ASR_Win10/API服务-启动.bat
-!Tailect_ASR_Win10/API服务-停止.bat
-!Tailect_ASR_Win10/API服务-状态.bat
-!Tailect_ASR_Win10/API_v1_离线部署与联调手册.md
-!Tailect_ASR_Win10/api_v1_config.json
-!Tailect_ASR_Win10/api_v1_service.ps1
-!Tailect_ASR_Win10/项目说明.txt
-!Tailect_ASR_Win10/WPy64-312101/
-Tailect_ASR_Win10/WPy64-312101/*
-!Tailect_ASR_Win10/WPy64-312101/python/
-Tailect_ASR_Win10/WPy64-312101/python/*
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/
-Tailect_ASR_Win10/WPy64-312101/python/Lib/*
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/
-Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/*
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/.gitignore
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/
-Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/*
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/
-Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/*
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/*.py
-Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/*副本*.py
-Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/qwen_asr/cli/__pycache__/
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/
-Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/*
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/__init__.py
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/__main__.py
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/cli/
-Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/cli/*
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/cli/__init__.py
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/cli/api_v1.py
-!Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/cli/preflight.py
-Tailect_ASR_Win10/WPy64-312101/python/Lib/site-packages/tailect_asr/cli/__pycache__/
