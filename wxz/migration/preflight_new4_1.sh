@@ -57,9 +57,13 @@ if command -v docker >/dev/null 2>&1; then
             --format='[INFO] old_container={{.Name}} status={{.State.Status}} exit={{.State.ExitCode}} oom_killed={{.State.OOMKilled}} finished={{.State.FinishedAt}}' \
             2>/dev/null || true
         old_running="$(docker inspect "$OLD_CONTAINER" --format='{{.State.Running}}' 2>/dev/null || true)"
+        old_oom_killed="$(docker inspect "$OLD_CONTAINER" --format='{{.State.OOMKilled}}' 2>/dev/null || true)"
         [[ "$old_running" == 'true' ]] \
             && fail "旧容器仍在运行: $OLD_CONTAINER" \
             || ok "旧容器未运行: $OLD_CONTAINER"
+        [[ "$old_oom_killed" == 'true' ]] \
+            && fail "旧容器曾被 OOM Kill；在继续使用 vLLM 0.7 前必须先核查显存日志" \
+            || ok '旧容器没有 OOMKilled 记录'
     else
         warn "未找到旧容器: $OLD_CONTAINER"
     fi
