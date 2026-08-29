@@ -1,0 +1,37 @@
+# Tailect V4.1 独立油猴脚本
+
+本目录是 V4.1 专用副本，不修改也不依赖原 `spyware-translator/` 目录。
+
+## 默认连接
+
+- 平台 API：`http://127.0.0.1:8885`
+- 模型：`Tailect_V4.1`（唯一选项）
+- 本机 CSV 助手：`http://127.0.0.1:18885`
+- 浏览器端识别并发：1；服务端也使用单进程 FIFO 队列。
+
+模型部署在另一台内网电脑时，只需在脚本设置中把“服务地址”改成
+`http://<模型电脑IP>:8885`。如果服务端设置了 `TAILECT_API_KEY`，在同一设置页填写 API Key。
+
+## 安装
+
+1. 将 `spyware-translator-v4.1.user.js` 导入 Tampermonkey。
+2. 如需自动保存本机 CSV，双击 `local_helper/启动本机CSV助手.bat` 并保持窗口运行。
+3. 打开目标业务页面，在悬浮面板中点击“检测模型服务”。检测不仅要求 `/health` 正常，还会核对服务模型必须为 `Tailect_V4.1`。
+
+脚本上传合并后的 WAV 到 `/v1/audiototext`，随后通过 `/translator/csv` 在模型电脑上保存一份 CSV。所有运行均可在离线内网完成。
+
+## 检查
+
+静态检查：
+
+```powershell
+node .\tests\userscript_static_test.mjs
+```
+
+服务上线后，使用项目测试音频做真实合同探测：
+
+```powershell
+node .\tests\tailect_v41_probe.mjs http://127.0.0.1:8885 Tailect_V4.1 ..\prompt材料\bian.wav
+```
+
+若启用了 API Key，先设置同名环境变量 `TAILECT_API_KEY`；探测脚本会自动发送 `X-API-Key`。

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "allow_hosts": [
+    "audio.example.internal",
+    "*.media.example.internal",
+    "10.20.0.0/16"
+  ]
+}

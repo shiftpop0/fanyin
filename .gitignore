@@ -7,6 +7,8 @@
 # Python / Node caches
 __pycache__/
 *.py[cod]
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
 node_modules/
 
 # Local runtime, models, generated outputs, and binary dependencies
@@ -20,6 +22,7 @@ Tailect_ASR_Win10/WPy64-312101/
 spyware-translator/temp/
 
 # Large or local-only artifacts
+*.tar
 *.wav
 *.mp3
 *.mp4
@@ -34,6 +37,25 @@ spyware-translator/temp/
 *.pt
 *.pth
 *.safetensors
+
+# Current Tailect V4.1 workspace: source is tracked, offline payloads are not
+/tailect-asr-*.tar
+/tailect/model/
+/tailect/log/
+/tailect/outputs/
+/tailect/**/outputs/
+/tailect/TargetDiarization-main/assets/
+/tailect/tests/*_results.json
+/tailect/core/config_auto.py
+/tailect/core/config_auto.full.py
+/tailect/config/audio_url_allowlist.json
+
+# Agent/user-local working materials
+/AGENTS.MD
+/del/
+/wxz/
+/spyware-translator-v4.1/temp/
+/spyware-translator-v4.1/**/runtime/
 
 # Environment and logs
 .env

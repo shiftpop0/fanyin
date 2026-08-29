@@ -1,8 +1,21 @@
 # fanyin
 
-更新时间：2026-06-23
+更新时间：2026-08-29
 
 本项目用于把侦控网页中的语音流接入本地 Tailect ASR 模型，并在网页端完成音频切片合并、v1 API 转写、CSV 缓存、结果查看和人工修正反馈。
+
+## new4.1 当前实现
+
+`new4.1` 分支新增当前 Linux/Docker 离线模型服务 `tailect/`，公开模型名固定为 `Tailect_V4.1`。现有 FastAPI 通用 API 继续监听 6006；平台标准接口由离线 Nginx 监听 8885，并转发至同一 6006 模型进程。首期只按单张 4090、单模型进程、FIFO 并发 1 部署，保持项目已验证的 `vllm_gpu_memory_utilization=0.7`。
+
+V4.1 油猴脚本和本机 CSV 助手位于独立目录 `spyware-translator-v4.1/`，默认调用 `http://127.0.0.1:8885`，使用独立配置和缓存，不修改下文所述的历史 `spyware-translator/` 与 `Tailect_ASR_Win10/`。
+
+- 模型服务说明：[`tailect/README.md`](tailect/README.md)
+- V4.1 接口、白名单和单 4090 部署：[`tailect/API_V4.1_离线接口与部署.md`](tailect/API_V4.1_离线接口与部署.md)
+- V4.1 油猴安装：[`spyware-translator-v4.1/README.md`](spyware-translator-v4.1/README.md)
+- 完整实施计划：[`new4.1_API与油猴脚本扩展实施计划.md`](new4.1_API与油猴脚本扩展实施计划.md)
+
+以下内容保留为原 `main` 分支 Windows/旧脚本实现的历史说明。
 
 ## 工作流
 

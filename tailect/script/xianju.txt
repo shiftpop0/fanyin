@@ -1,0 +1,416 @@
+import torch
+import os
+import json
+import argparse
+import gc
+from pathlib import Path
+from qwen_asr import Qwen3ASRModel
+import psutil
+import subprocess
+
+def get_gpu_memory():
+    """获取GPU显存使用情况"""
+    try:
+        result = subprocess.check_output(
+            ['nvidia-smi', '--query-gpu=memory.used,memory.total', '--format=csv,nounits,noheader'],
+            encoding='utf-8'
+        )
+        used, total = result.strip().split(',')
+        return int(used), int(total)
+    except:
+        return None, None
+
+class OptimizedAudioProcessor:
+    def __init__(self, input_dir, output_dir, device="cuda:0", 
+                 batch_size=12, max_tokens=256, 
+                 enable_flash_attention=True,
+                 enable_gradient_checkpointing=False):
+        
+        self.input_dir = Path(input_dir)
+        self.output_dir = Path(output_dir)
+        self.device = device
+        self.batch_size = batch_size
+        self.max_tokens = max_tokens
+        self.enable_flash_attention = enable_flash_attention
+        self.enable_gradient_checkpointing = enable_gradient_checkpointing
+        self.model = None
+        
+        # 动态batch调整
+        self.current_batch_size = batch_size
+        self.min_batch_size = 2
+        self.max_batch_size = 24
+        
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 统计信息
+        self.stats = {
+            'total': 0,
+            'processed': 0,
+            'success': 0,
+            'failed': 0,
+            'oom_errors': 0
+        }
+        
+        # 音频时长统计
+        self.audio_lengths = {}
+
+    def setup_model(self):
+        """初始化模型并优化显存使用"""
+        print("=" * 60)
+        print(f"GPU: RTX 4090 24GB")
+        print(f"初始显存: {get_gpu_memory()}")
+        print("=" * 60)
+        
+        # 显存优化配置
+        model_kwargs = {
+            "dtype": torch.bfloat16,
+            "device_map": self.device,
+            "max_inference_batch_size": self.max_batch_size,
+            "max_new_tokens": self.max_tokens,
+            "forced_aligner": "Qwen/Qwen3-ForcedAligner-0.6B",
+            "forced_aligner_kwargs": dict(
+                dtype=torch.bfloat16,
+                device_map=self.device,
+            ),
+        }
+        
+        # 启用Flash Attention（可以大幅减少显存占用）
+        if self.enable_flash_attention:
+            model_kwargs["attn_implementation"] = "flash_attention_2"
+            print("✓ Flash Attention 已启用 (显存优化)")
+        
+        # 启用梯度检查点（推理时不需要，但可以降低显存）
+        if self.enable_gradient_checkpointing:
+            model_kwargs["use_gradient_checkpointing"] = True
+            print("✓ Gradient Checkpointing 已启用 (显存优化)")
+        
+        try:
+            print("正在加载模型...")
+            self.model = Qwen3ASRModel.from_pretrained(
+                "Qwen/Qwen3-ASR-1.7B",
+                **model_kwargs
+            )
+            
+            # 清理缓存
+            torch.cuda.empty_cache()
+            
+            used, total = get_gpu_memory()
+            print(f"✓ 模型加载完成")
+            print(f"  显存使用: {used}MB / {total}MB")
+            print(f"  可用显存: {total - used}MB")
+            
+            # 根据可用显存调整batch size
+            available_memory = total - used
+            if available_memory > 18000:
+                self.current_batch_size = min(24, self.batch_size)
+            elif available_memory > 14000:
+                self.current_batch_size = min(16, self.batch_size)
+            elif available_memory > 10000:
+                self.current_batch_size = min(12, self.batch_size)
+            else:
+                self.current_batch_size = min(8, self.batch_size)
+            
+            print(f"  自动调整batch size: {self.current_batch_size}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"✗ 模型加载失败: {str(e)}")
+            return False
+
+    def adaptive_batch_size(self, audio_files):
+        """根据音频时长动态调整batch size"""
+        import wave
+        import subprocess
+        
+        lengths = []
+        
+        for audio_file in audio_files:
+            try:
+                # 获取音频时长（秒）
+                if audio_file.suffix == '.wav':
+                    with wave.open(str(audio_file), 'rb') as wav:
+                        frames = wav.getnframes()
+                        rate = wav.getframerate()
+                        duration = frames / float(rate)
+                        lengths.append(duration)
+                else:
+                    # 使用ffprobe获取时长
+                    cmd = ['ffprobe', '-v', 'error', '-show_entries', 
+                           'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', 
+                           str(audio_file)]
+                    result = subprocess.check_output(cmd, encoding='utf-8')
+                    duration = float(result.strip())
+                    lengths.append(duration)
+            except:
+                # 如果无法获取时长，使用默认值
+                lengths.append(15.0)
+        
+        avg_length = sum(lengths) / len(lengths) if lengths else 15.0
+        
+        # 根据平均时长调整batch size
+        if avg_length < 5:
+            return min(24, self.current_batch_size)
+        elif avg_length < 15:
+            return min(16, self.current_batch_size)
+        elif avg_length < 30:
+            return min(12, self.current_batch_size)
+        elif avg_length < 60:
+            return min(8, self.current_batch_size)
+        else:
+            return min(4, self.current_batch_size)
+
+    def process_batch_with_retry(self, audio_files, language="auto", max_retries=2):
+        """带重试机制的批次处理"""
+        results = []
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # 尝试处理
+                batch_results = self._process_batch(audio_files, language)
+                return batch_results
+                
+            except torch.cuda.OutOfMemoryError as e:
+                print(f"  ⚠ OOM错误 (尝试 {attempt + 1}/{max_retries + 1})")
+                self.stats['oom_errors'] += 1
+                
+                # 清理显存
+                torch.cuda.empty_cache()
+                gc.collect()
+                
+                if attempt < max_retries:
+                    # 减小batch size重试
+                    new_batch_size = max(self.min_batch_size, len(audio_files) // 2)
+                    if new_batch_size < len(audio_files):
+                        print(f"  减小batch size: {len(audio_files)} -> {new_batch_size}")
+                        # 分成更小的批次
+                        results = []
+                        for i in range(0, len(audio_files), new_batch_size):
+                            sub_batch = audio_files[i:i+new_batch_size]
+                            sub_results = self._process_batch(sub_batch, language)
+                            results.extend(sub_results)
+                        return results
+                    else:
+                        # 单个处理
+                        print("  降级为单文件处理")
+                        for audio_file in audio_files:
+                            try:
+                                single_result = self._process_batch([audio_file], language)
+                                results.extend(single_result)
+                            except Exception as e2:
+                                results.append({
+                                    "file_name": audio_file.name,
+                                    "file_path": str(audio_file),
+                                    "error": str(e2),
+                                    "status": "failed"
+                                })
+                        return results
+                else:
+                    # 所有重试都失败
+                    for audio_file in audio_files:
+                        results.append({
+                            "file_name": audio_file.name,
+                            "file_path": str(audio_file),
+                            "error": str(e),
+                            "status": "failed"
+                        })
+                    return results
+                    
+            except Exception as e:
+                print(f"  ✗ 处理失败: {str(e)}")
+                for audio_file in audio_files:
+                    results.append({
+                        "file_name": audio_file.name,
+                        "file_path": str(audio_file),
+                        "error": str(e),
+                        "status": "failed"
+                    })
+                return results
+        
+        return results
+
+    def _process_batch(self, audio_files, language="auto"):
+        """实际处理批次"""
+        if not self.model:
+            raise Exception("模型未初始化")
+        
+        results = []
+        audio_paths = [str(f) for f in audio_files]
+        
+        # 设置语言
+        if language == "auto":
+            languages = [None] * len(audio_files)
+        else:
+            languages = [language] * len(audio_files)
+        
+        # 转录
+        transcriptions = self.model.transcribe(
+            audio=audio_paths,
+            language=languages,
+            return_time_stamps=True,
+        )
+        
+        # 整理结果
+        for file_path, result in zip(audio_files, transcriptions):
+            result_dict = {
+                "file_name": file_path.name,
+                "file_path": str(file_path),
+                "language": result.language if hasattr(result, 'language') else None,
+                "text": result.text if hasattr(result, 'text') else None,
+                "status": "success"
+            }
+            
+            if hasattr(result, 'time_stamps') and result.time_stamps:
+                result_dict["time_stamps"] = result.time_stamps
+            
+            results.append(result_dict)
+            self.stats['success'] += 1
+        
+        return results
+
+    def run(self, language="auto", max_files=None):
+        """主处理流程"""
+        
+        # 获取所有音频文件
+        audio_files = []
+        extensions = ['.wav', '.mp3', '.flac', '.m4a', '.aac', '.ogg']
+        for ext in extensions:
+            for file_path in self.input_dir.rglob(f"*{ext}"):
+                audio_files.append(file_path)
+        
+        audio_files = sorted(set(audio_files))
+        self.stats['total'] = len(audio_files)
+        
+        if max_files:
+            audio_files = audio_files[:max_files]
+            print(f"限制处理数量: {max_files} 个文件")
+        
+        print(f"找到 {len(audio_files)} 个音频文件")
+        
+        if not audio_files:
+            print("没有找到音频文件")
+            return
+        
+        # 加载模型
+        if not self.setup_model():
+            return
+        
+        # 分批处理
+        batch_size = self.current_batch_size
+        total_batches = (len(audio_files) + batch_size - 1) // batch_size
+        
+        print(f"\n开始处理，共 {total_batches} 个批次")
+        print(f"初始batch size: {batch_size}")
+        print("=" * 60)
+        
+        all_results = []
+        
+        for i in range(0, len(audio_files), batch_size):
+            batch_end = min(i + batch_size, len(audio_files))
+            batch_files = audio_files[i:batch_end]
+            batch_num = i // batch_size + 1
+            
+            # 动态调整batch size（根据音频时长）
+            if len(batch_files) > 4:
+                adjusted_batch = self.adaptive_batch_size(batch_files)
+                if adjusted_batch < len(batch_files):
+                    # 重新分割批次
+                    print(f"  动态调整: {len(batch_files)} -> {adjusted_batch}")
+                    for j in range(0, len(batch_files), adjusted_batch):
+                        sub_batch = batch_files[j:j+adjusted_batch]
+                        self._process_single_batch(sub_batch, batch_num, language, all_results)
+                    continue
+            
+            self._process_single_batch(batch_files, batch_num, language, all_results)
+            
+            # 每处理10个批次清理一次缓存
+            if batch_num % 10 == 0:
+                torch.cuda.empty_cache()
+                gc.collect()
+                used, total = get_gpu_memory()
+                print(f"  显存清理: {used}MB / {total}MB")
+        
+        # 保存最终结果
+        self.save_final_results(all_results)
+        
+        # 打印统计
+        print("\n" + "=" * 60)
+        print("处理完成!")
+        print(f"总计: {len(all_results)} 个文件")
+        print(f"成功: {self.stats['success']} 个")
+        print(f"失败: {self.stats['failed']} 个")
+        print(f"OOM错误: {self.stats['oom_errors']} 次")
+        print("=" * 60)
+
+    def _process_single_batch(self, batch_files, batch_num, language, all_results):
+        """处理单个批次"""
+        print(f"\n批次 {batch_num}: 处理 {len(batch_files)} 个文件...")
+        
+        batch_results = self.process_batch_with_retry(batch_files, language)
+        all_results.extend(batch_results)
+        
+        # 保存中间结果
+        batch_file = self.output_dir / f"batch_{batch_num:04d}.json"
+        with open(batch_file, 'w', encoding='utf-8') as f:
+            json.dump(batch_results, f, ensure_ascii=False, indent=2)
+        
+        success_count = sum(1 for r in batch_results if r.get('status') == 'success')
+        failed_count = len(batch_results) - success_count
+        
+        print(f"  ✓ 批次完成")
+        print(f"    成功: {success_count}, 失败: {failed_count}")
+        print(f"    进度: {len(all_results)}/{self.stats['total']}")
+
+    def save_final_results(self, all_results):
+        """保存最终结果"""
+        final_file = self.output_dir / "all_results.json"
+        with open(final_file, 'w', encoding='utf-8') as f:
+            json.dump(all_results, f, ensure_ascii=False, indent=2)
+        
+        # 生成摘要
+        summary = {
+            "total": len(all_results),
+            "success": sum(1 for r in all_results if r.get('status') == 'success'),
+            "failed": sum(1 for r in all_results if r.get('status') == 'failed'),
+            "languages": {}
+        }
+        
+        for r in all_results:
+            if r.get('status') == 'success' and r.get('language'):
+                lang = r['language']
+                summary['languages'][lang] = summary['languages'].get(lang, 0) + 1
+        
+        summary_file = self.output_dir / "summary.json"
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="优化版批量音频转录（RTX 4090）")
+    parser.add_argument("--input_dir", type=str, required=True)
+    parser.add_argument("--output_dir", type=str, required=True)
+    parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--language", type=str, default="auto")
+    parser.add_argument("--batch_size", type=int, default=12, 
+                       help="建议: 8-16 (根据显存调整)")
+    parser.add_argument("--max_tokens", type=int, default=256)
+    parser.add_argument("--max_files", type=int, default=None)
+    parser.add_argument("--no_flash_attention", action="store_true",
+                       help="禁用Flash Attention")
+    
+    args = parser.parse_args()
+    
+    processor = OptimizedAudioProcessor(
+        input_dir=args.input_dir,
+        output_dir=args.output_dir,
+        device=args.device,
+        batch_size=args.batch_size,
+        max_tokens=args.max_tokens,
+        enable_flash_attention=not args.no_flash_attention
+    )
+    
+    processor.run(language=args.language, max_files=args.max_files)
+
+
+if __name__ == "__main__":
+    main()

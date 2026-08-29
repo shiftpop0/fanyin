@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+
+# Model files (large, not suitable for git)
+model/
+
+# Checkpoints
+checkpoints/
+**/checkpoints/
+
+# Environment
+.env
+venv/
+.venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Backups
+*.bak
+
+# Auto-generated config (by run_auto.sh)
+core/config_auto.py
+core/config_auto.full.py
+
+# Test outputs
+__pycache__/
+.pytest_cache/
+
+# Archives
+*.zip
+*.tar.gz
+
+# Logs (ͳһĿ¼)
+log/
+!log/.gitkeep

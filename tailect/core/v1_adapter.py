@@ -1,0 +1,91 @@
+"""Single-model FIFO adapter from the platform v1 contract to UnifiedService."""
+
+from __future__ import annotations
+
+import asyncio
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Dict, Mapping
+
+from core.v1_contract import V1ApiError, build_caption_rows, language_to_v1
+
+
+class FifoInferenceQueue:
+    """One active inference at a time; asyncio.Lock preserves waiter arrival order."""
+
+    def __init__(self, max_waiters: int, timeout_sec: float) -> None:
+        self.max_waiters = max(1, int(max_waiters))
+        self.timeout_sec = max(1.0, float(timeout_sec))
+        self._lock = asyncio.Lock()
+        self._waiting = 0
+        self._completed = 0
+
+    @asynccontextmanager
+    async def slot(self) -> AsyncIterator[None]:
+        if self._waiting >= self.max_waiters:
+            raise V1ApiError("inference queue is full", "E011")
+        self._waiting += 1
+        acquired = False
+        try:
+            try:
+                await asyncio.wait_for(self._lock.acquire(), timeout=self.timeout_sec)
+                acquired = True
+            except asyncio.TimeoutError as exc:
+                raise V1ApiError("inference queue wait timed out", "E012") from exc
+            yield
+            self._completed += 1
+        finally:
+            self._waiting = max(0, self._waiting - 1)
+            if acquired:
+                self._lock.release()
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "concurrency": 1,
+            "busy": self._lock.locked(),
+            "waiting": max(0, self._waiting - (1 if self._lock.locked() else 0)),
+            "max_waiters": self.max_waiters,
+            "completed": self._completed,
+        }
+
+
+def transcribe_platform_audio(
+    service: Any,
+    audio_path: str,
+    *,
+    language: str,
+    diarize: bool,
+    max_chars: int,
+    split_by_punctuation: bool,
+    config: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Run ASR -> local ForcedAligner -> optional diarization on one saved audio file."""
+    asr_result = service.asr_raw(audio_path)
+    text = str(asr_result.get("text") or "").strip()
+    if not text:
+        return {"language": language_to_v1(asr_result.get("language") or language), "text": "", "rows": []}
+
+    detected_language = str(asr_result.get("language") or "").strip()
+    align_language = detected_language or language or str(config.get("v1_default_language") or "Chinese")
+    aligned = service.forced_align(audio_path, text=text, language=align_language)
+    timestamps = aligned.get("segments") or []
+
+    speakers = []
+    if diarize:
+        try:
+            speakers = service.diarization_only(audio_path).get("segments") or []
+        except Exception:
+            if not bool(config.get("v1_diarization_fallback", True)):
+                raise
+
+    rows = build_caption_rows(
+        full_text=text,
+        timestamps=timestamps,
+        speaker_segments=speakers,
+        max_chars=max_chars,
+        split_by_punctuation=split_by_punctuation,
+    )
+    return {
+        "language": language_to_v1(detected_language or align_language),
+        "text": text,
+        "rows": rows,
+    }
