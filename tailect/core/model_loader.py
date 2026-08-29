@@ -234,6 +234,17 @@ def load_diarization_model(project_path: str, device: str) -> Any:
     if project_path not in sys.path:
         sys.path.insert(0, project_path)
 
+    # 当前 API 只使用基础说话人分离，不使用人声增强、音源分离或音频修复。
+    # 显式禁用这些可选模块，避免离线镜像因 resemble_enhance/typeguard 等
+    # 非核心依赖缺失而在 import 阶段产生干扰或失败。
+    disabled_audio_packages = {
+        item.strip()
+        for item in os.environ.get("AUDIOPROCESSOR_DISABLED_PACKAGES", "").split(",")
+        if item.strip()
+    }
+    disabled_audio_packages.update({"enhancer", "separater", "restorer"})
+    os.environ["AUDIOPROCESSOR_DISABLED_PACKAGES"] = ",".join(sorted(disabled_audio_packages))
+
     try:
         from TargetDiarization import TargetDiarization  # type: ignore
     except Exception as e:
@@ -247,8 +258,15 @@ def load_diarization_model(project_path: str, device: str) -> Any:
     diarization_pipeline_dir = os.path.join(
         MODEL_ROOT, "iic", "speech_campplus_speaker-diarization_common",
     )
-    od_model_dir = os.path.join(
-        MODEL_ROOT, "pyannote", "speaker-diarization-community-1",
+    # 本项目 README 与现有离线模型使用 speaker-diarization-3.1；兼容曾经
+    # 使用过的 community-1 目录名，优先选择现场真实存在的目录。
+    od_model_candidates = [
+        os.path.join(MODEL_ROOT, "pyannote", "speaker-diarization-3.1"),
+        os.path.join(MODEL_ROOT, "pyannote", "speaker-diarization-community-1"),
+    ]
+    od_model_dir = next(
+        (candidate for candidate in od_model_candidates if os.path.isdir(candidate)),
+        od_model_candidates[0],
     )
     embedding_model_dir = os.path.join(
         MODEL_ROOT, "iic", "speech_eres2netv2w24s4ep4_sv_zh-cn_16k-common",

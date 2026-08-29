@@ -7,8 +7,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PROJECT_ROOT="${REPOSITORY_ROOT}/tailect"
-IMAGE="${IMAGE:-tailect-asr-qwen3-asr:offline-salvaged-20260506}"
-NGINX_IMAGE="${NGINX_IMAGE:-nginx:alpine}"
+IMAGE="${IMAGE:-tailect-asr-qwen3-asr:full-diar-offline}"
+NGINX_IMAGE="${NGINX_IMAGE:-harbor.ge.cn/ailab/base/nginx:1.30.3-otel}"
 GPU_ID="${GPU_ID:-0}"
 MODEL_CONTAINER="${MODEL_CONTAINER:-tailect-v41-model}"
 PLATFORM_CONTAINER="${PLATFORM_CONTAINER:-tailect-v41-platform}"
@@ -72,6 +72,7 @@ else
         -v "${PROJECT_ROOT}:/workspace" -v "${MODEL_DIR}:/workspace/model"
         -w /workspace -e PYTHONPATH=/workspace -e CUDA_VISIBLE_DEVICES=0
         -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 -e MODELSCOPE_OFFLINE=1
+        -e AUDIOPROCESSOR_DISABLED_PACKAGES=enhancer,separater,restorer
         -e VLLM_NO_USAGE_STATS=1 -e TQDM_DISABLE=1 -e TZ=Asia/Shanghai
     )
     [[ -n "${TAILECT_API_KEY:-}" ]] && model_args+=(-e "TAILECT_API_KEY=${TAILECT_API_KEY}")

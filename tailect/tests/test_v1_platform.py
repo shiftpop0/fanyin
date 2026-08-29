@@ -7,8 +7,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from core.audio_input import HotReloadAllowlist, audio_url_host_allowed, validate_audio_url
+from core.audio_input import (
+    HotReloadAllowlist,
+    audio_url_host_allowed,
+    download_wav_url,
+    validate_audio_url,
+)
 from core.translator_store import TranslatorStore
 from core.security import RateLimiter, authorize, resolve_client_ip
 from core.v1_adapter import FifoInferenceQueue, transcribe_platform_audio
@@ -82,6 +88,24 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(result["rows"], [{"lid": "1", "text": "你好。", "begin": 200, "end": 900}])
         self.assertEqual(calls, ["asr", ("align", "你好。", "Chinese"), "diarization"])
 
+    def test_diarization_failure_is_not_hidden_when_fallback_is_disabled(self) -> None:
+        class FakeService:
+            def asr_raw(self, _path: str):
+                return {"text": "你好。", "language": "Chinese"}
+
+            def forced_align(self, _path: str, text: str, language: str):
+                return {"segments": [{"start": 0.2, "end": 0.9, "text": text}]}
+
+            def diarization_only(self, _path: str):
+                raise RuntimeError("TargetDiarization unavailable")
+
+        with self.assertRaisesRegex(RuntimeError, "TargetDiarization unavailable"):
+            transcribe_platform_audio(
+                FakeService(), "sample.wav", language="Chinese", diarize=True,
+                max_chars=40, split_by_punctuation=True,
+                config={"v1_default_language": "Chinese", "v1_diarization_fallback": False},
+            )
+
 
 class AllowlistTests(unittest.TestCase):
     def test_matching_rules_and_hot_reload_fail_closed(self) -> None:
@@ -100,6 +124,51 @@ class AllowlistTests(unittest.TestCase):
         self.assertFalse(allowlist.status()["loaded"])
         with self.assertRaises(V1ApiError):
             validate_audio_url("http://audio.internal/a.wav", allowlist.rules())
+
+    def test_url_filename1_sdp_keeps_business_name_and_uses_wav_path(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="url_sdp_", dir=RUNTIME_ROOT))
+        allowlist_path = root / "allowlist.json"
+        allowlist_path.write_text(json.dumps({"allow_hosts": ["1.2.3.4"]}), encoding="utf-8")
+        allowlist = HotReloadAllowlist(allowlist_path)
+        wav_payload = b"RIFF" + (16).to_bytes(4, "little") + b"WAVE" + b"data" + b"\x00" * 8
+
+        class FakeResponse:
+            headers = {"Content-Length": str(len(wav_payload))}
+
+            def __init__(self) -> None:
+                self.sent = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _size: int) -> bytes:
+                if self.sent:
+                    return b""
+                self.sent = True
+                return wav_payload
+
+        class FakeOpener:
+            def open(self, _request, timeout: float):
+                self.timeout = timeout
+                return FakeResponse()
+
+        with patch("core.audio_input.build_opener", return_value=FakeOpener()):
+            original_name, audio_path = download_wav_url(
+                "http://1.2.3.4/audio.wav?filename1=xxx.sdp",
+                root / "downloads",
+                limit_bytes=1024,
+                timeout_sec=30,
+                max_redirects=5,
+                allowlist=allowlist,
+            )
+
+        self.assertEqual(original_name, "xxx.sdp")
+        self.assertEqual(audio_path.suffix, ".wav")
+        self.assertTrue(audio_path.exists())
+        self.assertFalse(audio_path.with_suffix(".sdp").exists())
 
 
 class TranslatorStoreTests(unittest.TestCase):

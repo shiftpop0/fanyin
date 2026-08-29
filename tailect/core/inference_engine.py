@@ -871,7 +871,7 @@ class UnifiedService:
             )
         except Exception as e:
             self.diarization_init_error = str(e)
-            logger.warning("[DIAR] Disabled at startup: %s", e)
+            logger.warning("[DIAR] Disabled at startup: %s", e, exc_info=True)
         self.forced_aligner = ForcedAlignWrapper(
             model_path=config["forced_aligner_model_path"],
             device=str(config.get("forced_aligner_device", "cuda:0")),

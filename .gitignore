@@ -39,6 +39,9 @@ node_modules/
 /tailect/core/config_auto.py
 /tailect/core/config_auto.full.py
 /tailect/config/audio_url_allowlist.json
+/wxz/migration/build/
+/wxz/migration/packages/
+/wxz/日志/
 
 # Agent/user-local working materials
 /AGENTS.MD

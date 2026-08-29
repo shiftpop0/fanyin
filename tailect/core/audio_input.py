@@ -291,4 +291,10 @@ def download_wav_url(
         raise V1ApiError("audio URL returned an empty response", "E014")
     if not is_wav_file(target):
         raise V1ApiError("audio URL response is not WAV audio", "E015")
+    # 平台 URL 常用 filename1=xxx.sdp 表示业务文件名，但响应内容仍是 WAV。
+    # 保留返回给平台的原始 .sdp 名称，推理侧改用 .wav 后缀，避免下游库按扩展名误判。
+    if target.suffix.lower() == ".sdp":
+        wav_target = target.with_suffix(".wav")
+        target.replace(wav_target)
+        target = wav_target
     return name, target

@@ -96,7 +96,8 @@ CONFIG: Dict[str, Any] = {
     "v1_default_language": "Chinese",
     "v1_default_max_chars": 40,
     "v1_split_by_punctuation": True,
-    "v1_diarization_fallback": True,
+    # 平台要求 diarize=1 必须真正完成说话人分离；失败时返回错误，禁止伪装成单说话人。
+    "v1_diarization_fallback": False,
     "v1_audio_convert_timeout_sec": 120,
     "v1_upload_dir": "outputs/api_uploads",
     "translator_output_root": "outputs/fanyin_output",
