@@ -1,5 +1,5 @@
 param(
-    [string]$PackageDate = "20260829-r5"
+    [string]$PackageDate = "20260829-r6"
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,8 +65,14 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot "迁移包使用说明.md") `
 
 $UserscriptDestination = Join-Path $PayloadRoot "spyware-translator-v4.1"
 New-Item -ItemType Directory -Path $UserscriptDestination -Force | Out-Null
-Copy-Item -Path (Join-Path $RepositoryRoot "spyware-translator-v4.1\*") `
-    -Destination $UserscriptDestination -Recurse
+@(
+    "spyware-translator-v4.1/spyware-translator-v4.1.user.js",
+    "spyware-translator-v4.1/tests/tailect_v41_probe.mjs",
+    "spyware-translator-v4.1/tests/userscript_static_test.mjs",
+    "spyware-translator-v4.1/local_helper/build_offline_client.bat",
+    "spyware-translator-v4.1/local_helper/build_offline_client.ps1",
+    "spyware-translator-v4.1/local_helper/local_csv_helper.mjs"
+) | ForEach-Object { Copy-RepoFile -RelativePath $_ -DestinationRoot $PayloadRoot }
 
 $TopMigration = Join-Path $PackageRoot "migration"
 New-Item -ItemType Directory -Path $TopMigration -Force | Out-Null
@@ -99,6 +105,15 @@ $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 tar -czf $ArchivePath -C $StageRoot $PackageName
 if ($LASTEXITCODE -ne 0) {
     throw "tar failed with exit code $LASTEXITCODE"
+}
+
+$ArchiveEntries = @(tar -tzf $ArchivePath)
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to list the generated archive"
+}
+$NonAsciiEntries = @($ArchiveEntries | Where-Object { $_ -match '[^\x00-\x7F]' })
+if ($NonAsciiEntries.Count -gt 0) {
+    throw "Archive contains non-ASCII paths, which are not allowed in the Ubuntu migration package: $($NonAsciiEntries -join ', ')"
 }
 
 $ArchiveHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $ArchivePath).Hash.ToLowerInvariant()
