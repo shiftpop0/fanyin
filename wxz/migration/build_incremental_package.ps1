@@ -1,5 +1,5 @@
 param(
-    [string]$PackageDate = "20260829-r4"
+    [string]$PackageDate = "20260829-r5"
 )
 
 $ErrorActionPreference = "Stop"
@@ -88,7 +88,13 @@ $ManifestLines = Get-ChildItem -LiteralPath $PackageRoot -File -Recurse |
         $Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
         "$Hash  $Relative"
     }
-Set-Content -LiteralPath (Join-Path $PackageRoot "SHA256SUMS") -Value $ManifestLines -Encoding utf8NoBOM
+$ManifestText = ($ManifestLines -join "`n") + "`n"
+$Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[System.IO.File]::WriteAllText(
+    (Join-Path $PackageRoot "SHA256SUMS"),
+    $ManifestText,
+    $Utf8NoBom
+)
 
 tar -czf $ArchivePath -C $StageRoot $PackageName
 if ($LASTEXITCODE -ne 0) {
