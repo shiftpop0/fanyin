@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, Mapping
 
+from core.logger import logger
 from core.v1_contract import V1ApiError, build_caption_rows, language_to_v1
 
 
@@ -58,24 +60,44 @@ def transcribe_platform_audio(
     split_by_punctuation: bool,
     config: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    """Run ASR -> local ForcedAligner -> optional diarization on one saved audio file."""
-    asr_result = service.asr_raw(audio_path)
-    text = str(asr_result.get("text") or "").strip()
-    if not text:
-        return {"language": language_to_v1(asr_result.get("language") or language), "text": "", "rows": []}
+    """Run the native ASR pipeline, then adapt it to the platform contract."""
+    speakers = []
+    detected_language = ""
+    if diarize:
+        native_result = service.transcribe_diarized_segments(
+            audio_path,
+            os.path.basename(audio_path),
+            allow_diarization_fallback=bool(config.get("v1_diarization_fallback", False)),
+        )
+        text = str(native_result.get("overall_text") or "").strip()
+        speakers = native_result.get("speaker_segments") or []
+        language_candidates = [
+            str(item or "").strip()
+            for item in native_result.get("detected_languages", [])
+            if str(item or "").strip()
+        ]
+        if language_candidates:
+            detected_language = max(
+                dict.fromkeys(language_candidates),
+                key=language_candidates.count,
+            )
+        pipeline = "diarized_segment_asr"
+    else:
+        asr_result = service.asr_raw(audio_path)
+        text = str(asr_result.get("text") or "").strip()
+        detected_language = str(asr_result.get("language") or "").strip()
+        pipeline = "whole_audio_asr"
 
-    detected_language = str(asr_result.get("language") or "").strip()
+    if not text:
+        return {
+            "language": language_to_v1(detected_language or language),
+            "text": "",
+            "rows": [],
+        }
+
     align_language = detected_language or language or str(config.get("v1_default_language") or "Chinese")
     aligned = service.forced_align(audio_path, text=text, language=align_language)
     timestamps = aligned.get("segments") or []
-
-    speakers = []
-    if diarize:
-        try:
-            speakers = service.diarization_only(audio_path).get("segments") or []
-        except Exception:
-            if not bool(config.get("v1_diarization_fallback", True)):
-                raise
 
     rows = build_caption_rows(
         full_text=text,
@@ -83,6 +105,15 @@ def transcribe_platform_audio(
         speaker_segments=speakers,
         max_chars=max_chars,
         split_by_punctuation=split_by_punctuation,
+    )
+    logger.info(
+        "[V1-ASR] pipeline=%s text_len=%s speaker_segments=%s aligned_segments=%s rows=%s language=%s",
+        pipeline,
+        len(text),
+        len(speakers),
+        len(timestamps),
+        len(rows),
+        detected_language or align_language,
     )
     return {
         "language": language_to_v1(detected_language or align_language),

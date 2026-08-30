@@ -170,6 +170,45 @@ def normalize_speaker_segments(items: Any) -> List[Tuple[float, float, str]]:
     return output
 
 
+def _split_text_parts(text: str) -> List[str]:
+    return re.findall(r"([^，。！？；：,.!?:; \n]+[，。！？；：,.!?:; \n]*)", str(text or ""))
+
+
+def _speaker_bounded_parts(
+    full_text: str,
+    items: Any,
+) -> List[Tuple[str, str, bool]]:
+    """Return text parts carrying hard speaker boundaries when segment text is available."""
+    if not isinstance(items, list):
+        return []
+    labels: Dict[str, str] = {}
+    text_segments: List[Tuple[str, str]] = []
+    for item in items:
+        if not isinstance(item, dict) or "text" not in item:
+            return []
+        try:
+            start = float(item.get("start", 0.0))
+            end = float(item.get("end", 0.0))
+        except (TypeError, ValueError):
+            return []
+        if end <= start:
+            return []
+        raw = str(item.get("speaker", "unknown"))
+        if raw not in labels:
+            labels[raw] = str(len(labels) + 1)
+        text_segments.append((str(item.get("text") or ""), labels[raw]))
+
+    if not text_segments or "".join(item[0] for item in text_segments).strip() != str(full_text or "").strip():
+        return []
+
+    output: List[Tuple[str, str, bool]] = []
+    for segment_text, lid in text_segments:
+        segment_parts = _split_text_parts(segment_text)
+        for index, part in enumerate(segment_parts):
+            output.append((part, lid, index == len(segment_parts) - 1))
+    return output
+
+
 def build_caption_rows(
     *,
     full_text: str,
@@ -185,26 +224,75 @@ def build_caption_rows(
         raise V1ApiError("local ForcedAligner returned no timestamps", "E016")
 
     speakers = normalize_speaker_segments(speaker_segments)
-    parts = re.findall(r"([^，。！？；：,.!?:; \n]+[，。！？；：,.!?:; \n]*)", text)
+    bounded_parts = _speaker_bounded_parts(text, speaker_segments)
+    parts: List[Tuple[str, str, bool]] = bounded_parts or [
+        (part, "", False) for part in _split_text_parts(text)
+    ]
+
+    normalized_timestamps: List[Tuple[Dict[str, Any], int]] = []
+    previous_start = -1.0
+    for item in timestamps:
+        if not isinstance(item, dict):
+            raise V1ApiError("local ForcedAligner returned an invalid timestamp item", "E016")
+        try:
+            start_sec = float(item.get("start", 0.0))
+            end_sec = float(item.get("end", 0.0))
+        except (TypeError, ValueError) as exc:
+            raise V1ApiError("local ForcedAligner returned a non-numeric timestamp", "E016") from exc
+        if start_sec < 0 or end_sec <= start_sec or start_sec < previous_start:
+            raise V1ApiError("local ForcedAligner returned invalid or non-monotonic timestamps", "E016")
+        previous_start = start_sec
+        item_len = _pure_text_len(str(item.get("text", "")))
+        if item_len > 0:
+            normalized_timestamps.append((item, item_len))
+    if not normalized_timestamps:
+        raise V1ApiError("local ForcedAligner returned no textual timestamps", "E016")
+
     rows: List[Dict[str, Any]] = []
     timestamp_index = 0
+    timestamp_offset = 0
     current_timestamps: List[Dict[str, Any]] = []
     current_text = ""
+    current_lid = ""
+
+    def consume_timestamps(target_len: int) -> List[Dict[str, Any]]:
+        nonlocal timestamp_index, timestamp_offset
+        remaining = max(0, int(target_len))
+        selected: List[Dict[str, Any]] = []
+        while remaining > 0:
+            if timestamp_index >= len(normalized_timestamps):
+                raise V1ApiError("local ForcedAligner did not cover the full transcript", "E016")
+            item, item_len = normalized_timestamps[timestamp_index]
+            available = item_len - timestamp_offset
+            if available <= 0:
+                timestamp_index += 1
+                timestamp_offset = 0
+                continue
+            if not selected or selected[-1] is not item:
+                selected.append(item)
+            consumed = min(remaining, available)
+            remaining -= consumed
+            timestamp_offset += consumed
+            if timestamp_offset >= item_len:
+                timestamp_index += 1
+                timestamp_offset = 0
+        return selected
 
     def flush() -> None:
-        nonlocal current_timestamps, current_text
+        nonlocal current_timestamps, current_text, current_lid
         row_text = current_text.strip()
         if not current_timestamps or not row_text:
             current_timestamps = []
             current_text = ""
+            current_lid = ""
             return
         start_sec = float(current_timestamps[0].get("start", 0.0) or 0.0)
         end_sec = float(current_timestamps[-1].get("end", 0.0) or 0.0)
-        if end_sec < start_sec:
-            end_sec = start_sec
+        if end_sec <= start_sec:
+            raise V1ApiError("local ForcedAligner produced an empty caption range", "E016")
         rows.append(
             {
-                "lid": _best_speaker(start_sec, end_sec, speakers),
+                "lid": current_lid or _best_speaker(start_sec, end_sec, speakers),
                 "text": row_text,
                 "begin": int(round(start_sec * 1000)),
                 "end": int(round(end_sec * 1000)),
@@ -212,25 +300,29 @@ def build_caption_rows(
         )
         current_timestamps = []
         current_text = ""
+        current_lid = ""
 
-    for part in parts:
+    for part, forced_lid, hard_boundary in parts:
         target_len = _pure_text_len(part)
         if target_len <= 0:
             current_text += part
             continue
-        consumed = 0
-        start_index = timestamp_index
-        while timestamp_index < len(timestamps) and consumed < target_len:
-            consumed += _pure_text_len(str(timestamps[timestamp_index].get("text", "")))
-            timestamp_index += 1
-        if timestamp_index > start_index:
-            current_timestamps.extend(timestamps[start_index:timestamp_index])
+        part_timestamps = consume_timestamps(target_len)
+        part_start = float(part_timestamps[0].get("start", 0.0) or 0.0)
+        part_end = float(part_timestamps[-1].get("end", 0.0) or 0.0)
+        part_lid = forced_lid or _best_speaker(part_start, part_end, speakers)
+        if current_timestamps and current_lid and part_lid != current_lid:
+            flush()
+        current_timestamps.extend(part_timestamps)
         current_text += part
+        current_lid = part_lid
         punctuation_end = bool(re.search(r"[，。！？；：,.!?:;\n]\s*$", part))
         length_overflow = _pure_text_len(current_text) >= max(1, int(max_chars))
-        if (split_by_punctuation and punctuation_end) or length_overflow:
+        if hard_boundary or (split_by_punctuation and punctuation_end) or length_overflow:
             flush()
 
     if current_timestamps or current_text.strip():
         flush()
+    if sum(_pure_text_len(row.get("text", "")) for row in rows) != _pure_text_len(text):
+        raise V1ApiError("caption rows did not preserve the full transcript", "E016")
     return rows

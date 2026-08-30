@@ -355,12 +355,16 @@ class ASRWrapper:
         return min(self.batch_size, 48)
 
     def transcribe_batch(self, audio_list: List[Any]) -> List[str]:
-        """
-        真批量转录（主动分批版）。
+        """批量转录并保持原有的纯文本返回合同。"""
+        return [item["text"] for item in self.transcribe_batch_detailed(audio_list)]
 
-        将音频按 _BATCH_SAFE_LIMIT（min(batch_size, 48)）切分成多个小 batch，
+    def transcribe_batch_detailed(self, audio_list: List[Any]) -> List[Dict[str, str]]:
+        """真批量转录，同时保留每个片段的模型语言。
+
+        将音频按 _BATCH_SAFE_LIMIT（min(batch_size, 48)）切成多个小 batch，
         每批独立调用 model.transcribe(audio=chunk)，绕过 Qwen3 内部 max_batch_size
-        分片导致的 KV cache 形状不匹配问题，同时保持 GPU 批量推理性能。
+        分片导致的 KV cache 形状不匹配问题。旧调用方继续通过
+        :meth:`transcribe_batch` 获得 ``List[str]``。
         """
         if self.model is None:
             raise RuntimeError("ASR model is not loaded")
@@ -378,18 +382,32 @@ class ASRWrapper:
                 cleanup_paths.append(prepared)
 
         chunk_size = self._BATCH_SAFE_LIMIT()
-        results: List[str] = []
+        results: List[Dict[str, str]] = []
         try:
             for chunk_start in range(0, len(prepared_inputs), chunk_size):
                 chunk = prepared_inputs[chunk_start:chunk_start + chunk_size]
                 try:
                     batch_results = self._call_model_transcribe(chunk)
                     if isinstance(batch_results, list):
-                        chunk_texts = [self._extract_text_from_result(r) for r in batch_results]
+                        chunk_details = [
+                            {
+                                "text": self._extract_text_from_result(item),
+                                "language": self._extract_language_from_result(item),
+                            }
+                            for item in batch_results
+                        ]
                     else:
-                        text = self._extract_text_from_result(batch_results)
-                        chunk_texts = [text] * len(chunk)
-                    results.extend(chunk_texts)
+                        detail = {
+                            "text": self._extract_text_from_result(batch_results),
+                            "language": self._extract_language_from_result(batch_results),
+                        }
+                        chunk_details = [dict(detail) for _ in chunk]
+                    if len(chunk_details) != len(chunk):
+                        raise RuntimeError(
+                            "ASR batch result count mismatch: "
+                            f"expected={len(chunk)} actual={len(chunk_details)}"
+                        )
+                    results.extend(chunk_details)
                 except Exception as e:
                     logger.error(
                         "[ASR] Chunk batch failed (indices %s-%s), clearing cache & falling back per-item: %s",
@@ -401,15 +419,19 @@ class ASRWrapper:
                     # 该 chunk 内逐条降级
                     for i, item in enumerate(chunk):
                         try:
-                            text = self.transcribe(item)
-                            chunk_texts = [text]
+                            detail = self.transcribe_detailed(item)
                         except Exception as e2:
                             logger.error(
                                 "[ASR] Fallback transcription failed idx=%s: %s",
                                 chunk_start + i, e2,
                             )
-                            chunk_texts = [""]
-                        results.extend(chunk_texts)
+                            detail = {"text": "", "language": ""}
+                        results.append(
+                            {
+                                "text": str(detail.get("text") or ""),
+                                "language": str(detail.get("language") or ""),
+                            }
+                        )
             return results
         finally:
             for p in cleanup_paths:
@@ -780,6 +802,7 @@ def transcribe_with_retry(
                 )
                 return {
                     "text": "",
+                    "language": "",
                     "segment_index": segment_index,
                     "started_at_epoch": started_at_epoch,
                     "started_at_wall": started_at_wall,
@@ -791,7 +814,9 @@ def transcribe_with_retry(
                     "empty_segment": True,
                 }
 
-            text = asr.transcribe((segment_audio, sr))
+            detail = asr.transcribe_detailed((segment_audio, sr))
+            text = str(detail.get("text") or "")
+            language = str(detail.get("language") or "")
             finished_at_epoch = time.time()
             finished_at_wall = format_wall_time(finished_at_epoch)
             logger.info(
@@ -804,6 +829,7 @@ def transcribe_with_retry(
             )
             return {
                 "text": text,
+                "language": language,
                 "segment_index": segment_index,
                 "started_at_epoch": started_at_epoch,
                 "started_at_wall": started_at_wall,
@@ -833,6 +859,7 @@ def transcribe_with_retry(
     finished_at_wall = format_wall_time(finished_at_epoch)
     return {
         "text": "",
+        "language": "",
         "segment_index": segment_index,
         "started_at_epoch": started_at_epoch,
         "started_at_wall": started_at_wall,
@@ -986,8 +1013,18 @@ class UnifiedService:
         """恢复文本标点"""
         return {"text": self.punctuation.restore(text)}
 
-    def diarization_then_asr(self, audio_path: str, input_filename: str) -> Dict[str, Any]:
-        """先分离后分段 ASR，利用 Qwen3ASRModel 原生批量推理大幅提升吞吐量"""
+    def transcribe_diarized_segments(
+        self,
+        audio_path: str,
+        input_filename: str,
+        *,
+        allow_diarization_fallback: bool = True,
+    ) -> Dict[str, Any]:
+        """共享的先分离、后分段批量 ASR 核心。
+
+        6006 原生接口和 8885 平台接口必须复用这一实现。调用方可以单独
+        决定说话人分离失败时是否允许退回整段 ASR。
+        """
         if self.diarization is not None:
             audio_data, sr = self.diarization.read_audio(audio_path)
         else:
@@ -1015,6 +1052,9 @@ class UnifiedService:
             if not segments:
                 raise RuntimeError("Empty diarization result")
         except Exception as e:
+            if not allow_diarization_fallback:
+                logger.error("Diarization failed in strict mode: %s", e)
+                raise
             logger.error("Diarization failed, fallback to whole-audio ASR: %s", e)
             diarization_status = f"fallback_asr: {str(e)}"
             # 降级：利用 Qwen3ASR 内部纯 ASR 智能切分逻辑处理长音频
@@ -1054,6 +1094,9 @@ class UnifiedService:
                 "timing_debug": {"available": False},
                 "segment_workers_effective": 1,
                 "request_id": request_id,
+                "detected_languages": [
+                    str(fallback_result.get("language") or "")
+                ] if str(fallback_result.get("language") or "").strip() else [],
             }
 
         worker_count = max(1, int(self.config["segment_workers"]))
@@ -1084,10 +1127,10 @@ class UnifiedService:
             try:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     future = pool.submit(
-                        self.asr.transcribe_batch,
+                        self.asr.transcribe_batch_detailed,
                         [(clip, sr) for clip in clips],
                     )
-                    batch_texts = future.result(timeout=batch_timeout)
+                    batch_details = future.result(timeout=batch_timeout)
             except concurrent.futures.TimeoutError:
                 logger.error(
                     "[SEG-ASR][BATCH-TIMEOUT] request_id=%s timeout=%ss, "
@@ -1097,19 +1140,24 @@ class UnifiedService:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
-                batch_texts = []
+                batch_details = []
                 for idx, (clip, seg) in enumerate(zip(clips, segments)):
                     try:
                         result = transcribe_with_retry(
                             self.asr, clip, sr, idx, seg, request_id, 2,
                         )
-                        batch_texts.append(result.get("text", ""))
+                        batch_details.append(
+                            {
+                                "text": str(result.get("text") or ""),
+                                "language": str(result.get("language") or ""),
+                            }
+                        )
                     except Exception as e2:
                         logger.error(
                             "[SEG-ASR][FAIL] request_id=%s idx=%s error=%s",
                             request_id, idx, e2,
                         )
-                        batch_texts.append("")
+                        batch_details.append({"text": "", "language": ""})
             except Exception as e:
                 logger.error(
                     "[SEG-ASR][BATCH-FAIL] request_id=%s error=%s, clearing cache & falling back to sequential",
@@ -1118,19 +1166,24 @@ class UnifiedService:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                     torch.cuda.synchronize()
-                batch_texts = []
+                batch_details = []
                 for idx, (clip, seg) in enumerate(zip(clips, segments)):
                     try:
                         result = transcribe_with_retry(
                             self.asr, clip, sr, idx, seg, request_id, 2,
                         )
-                        batch_texts.append(result.get("text", ""))
+                        batch_details.append(
+                            {
+                                "text": str(result.get("text") or ""),
+                                "language": str(result.get("language") or ""),
+                            }
+                        )
                     except Exception as e2:
                         logger.error(
                             "[SEG-ASR][FAIL] request_id=%s idx=%s error=%s",
                             request_id, idx, e2,
                         )
-                        batch_texts.append("")
+                        batch_details.append({"text": "", "language": ""})
             finally:
                 self.asr.reset_kv_cache()
 
@@ -1145,8 +1198,13 @@ class UnifiedService:
         )
 
         # Step 3: 组装结果
+        detected_languages: List[str] = []
         for idx, seg in enumerate(segments):
-            text = batch_texts[idx] if idx < len(batch_texts) else ""
+            detail = batch_details[idx] if idx < len(batch_details) else {}
+            text = str(detail.get("text") or "")
+            detected_language = str(detail.get("language") or "").strip()
+            if detected_language:
+                detected_languages.append(detected_language)
             results_map[idx] = {
                 "start": float(seg["start"]),
                 "end": float(seg["end"]),
@@ -1190,7 +1248,18 @@ class UnifiedService:
             "timing_debug": timing_debug,
             "segment_workers_effective": worker_count,
             "request_id": request_id,
+            "detected_languages": detected_languages,
         }
+
+    def diarization_then_asr(self, audio_path: str, input_filename: str) -> Dict[str, Any]:
+        """6006 原生响应包装；保持现有字段和降级行为不变。"""
+        result = self.transcribe_diarized_segments(
+            audio_path,
+            input_filename,
+            allow_diarization_fallback=True,
+        )
+        result.pop("detected_languages", None)
+        return result
 
 
 # ===================================================================

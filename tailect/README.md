@@ -64,6 +64,16 @@
 
 生产部署保留两个端口角色：6006 是当前 FastAPI 通用接口；8885 由离线 Nginx 仅代理 `/health`、`/v1/audiototext` 和 `/translator/*` 到同一 6006 进程，因此显存中只加载一份模型。单张 4090 的安全启动方式、接口合同、URL 白名单和油猴联调详见 [Tailect_V4.1 离线接口与部署](../wxz/docs/Tailect_V4.1离线接口与部署.md)。
 
+> **R9 处理链路：** `8885/v1/audiototext?diarize=1` 与
+> `6006/asr?diarization=true` 复用同一个“TargetDiarization → 说话人片段裁剪 →
+> 批量 ASR”核心。6006 保持原生 JSON，8885 再执行 ForcedAligner 和平台字幕适配，
+> 保持 `code/language/data/file_name/message/uuid` 合同。两个端口进入同一个 FastAPI
+> 进程，但 URL 不同，因此仍由不同路由负责外层协议。
+
+> **声道边界：** R9 服务端不主动把已经有效的 WAV 合并为单声道。浏览器端需要的
+> 多声道 PCM WAV 合并由 V4.1 油猴脚本 `0.5.1` 完成。只有非 WAV 上传为了离线解码
+> 兼容才会由 ffmpeg 转为 16 kHz 单声道 WAV。
+
 ---
 
 ## 🏗 技术栈

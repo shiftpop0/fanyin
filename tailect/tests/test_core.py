@@ -182,6 +182,56 @@ class TestInferenceEngine(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             resolve_diarization_project_path("/nonexistent/path")
 
+    def test_native_6006_wrapper_keeps_public_response_shape(self):
+        from core.inference_engine import UnifiedService
+
+        service = UnifiedService.__new__(UnifiedService)
+        service.transcribe_diarized_segments = lambda *_args, **_kwargs: {
+            "input_file": "sample.wav",
+            "speaker_count": 1,
+            "diarization_status": "ok",
+            "overall_text": "你好",
+            "speaker_segments": [],
+            "timing_debug": {"available": False},
+            "segment_workers_effective": 32,
+            "request_id": "request-id",
+            "detected_languages": ["Chinese"],
+        }
+
+        result = UnifiedService.diarization_then_asr(service, "sample.wav", "sample.wav")
+
+        self.assertNotIn("detected_languages", result)
+        self.assertEqual(result["overall_text"], "你好")
+        self.assertEqual(result["segment_workers_effective"], 32)
+
+    def test_batch_detailed_preserves_language_and_legacy_text_contract(self):
+        from core.inference_engine import ASRWrapper
+
+        class FakeResult:
+            def __init__(self, text, language):
+                self.text = text
+                self.language = language
+
+        wrapper = ASRWrapper.__new__(ASRWrapper)
+        wrapper.model = object()
+        wrapper.batch_size = 48
+        wrapper._prepare_audio_input = lambda item: item
+        wrapper._call_model_transcribe = lambda items: [
+            FakeResult(f"text-{index}", "Chinese") for index, _item in enumerate(items)
+        ]
+
+        detailed = wrapper.transcribe_batch_detailed(["a.wav", "b.wav"])
+        texts = wrapper.transcribe_batch(["a.wav", "b.wav"])
+
+        self.assertEqual(
+            detailed,
+            [
+                {"text": "text-0", "language": "Chinese"},
+                {"text": "text-1", "language": "Chinese"},
+            ],
+        )
+        self.assertEqual(texts, ["text-0", "text-1"])
+
 
 class TestAPIServer(unittest.TestCase):
     """测试 API 服务模块"""

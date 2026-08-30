@@ -63,7 +63,88 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(rows[0]["end"], 800)
         self.assertEqual(rows[1]["begin"], 900)
 
-    def test_adapter_uses_local_aligner_and_optional_diarization(self) -> None:
+    def test_caption_rows_split_on_native_speaker_boundaries(self) -> None:
+        rows = build_caption_rows(
+            full_text="你好世界",
+            timestamps=[
+                {"start": 0.1, "end": 0.5, "text": "你好"},
+                {"start": 0.6, "end": 1.0, "text": "世界"},
+            ],
+            speaker_segments=[
+                {"start": 0.0, "end": 0.55, "speaker": "speaker-a", "text": "你好"},
+                {"start": 0.55, "end": 1.2, "speaker": "speaker-b", "text": "世界"},
+            ],
+            max_chars=40,
+            split_by_punctuation=False,
+        )
+        self.assertEqual(
+            rows,
+            [
+                {"lid": "1", "text": "你好", "begin": 100, "end": 500},
+                {"lid": "2", "text": "世界", "begin": 600, "end": 1000},
+            ],
+        )
+
+    def test_caption_rows_reject_incomplete_alignment(self) -> None:
+        with self.assertRaisesRegex(V1ApiError, "did not cover the full transcript") as raised:
+            build_caption_rows(
+                full_text="你好世界",
+                timestamps=[{"start": 0.1, "end": 0.5, "text": "你好"}],
+            )
+        self.assertEqual(raised.exception.error_id, "E016")
+
+    def test_adapter_reuses_native_diarized_asr_before_alignment(self) -> None:
+        calls = []
+
+        class FakeService:
+            def transcribe_diarized_segments(
+                self,
+                _path: str,
+                input_filename: str,
+                *,
+                allow_diarization_fallback: bool,
+            ):
+                calls.append(("native-diarized-asr", input_filename, allow_diarization_fallback))
+                return {
+                    "overall_text": "你好。世界。",
+                    "speaker_segments": [
+                        {"start": 0.0, "end": 0.55, "speaker": "speaker-a", "text": "你好。"},
+                        {"start": 0.55, "end": 1.2, "speaker": "speaker-b", "text": "世界。"},
+                    ],
+                    "detected_languages": ["Chinese", "Chinese"],
+                }
+
+            def forced_align(self, _path: str, text: str, language: str):
+                calls.append(("align", text, language))
+                return {
+                    "segments": [
+                        {"start": 0.2, "end": 0.5, "text": "你好"},
+                        {"start": 0.6, "end": 0.9, "text": "世界"},
+                    ]
+                }
+
+        result = transcribe_platform_audio(
+            FakeService(), "sample.wav", language="Chinese", diarize=True,
+            max_chars=40, split_by_punctuation=True,
+            config={"v1_default_language": "Chinese", "v1_diarization_fallback": False},
+        )
+        self.assertEqual(result["language"], "zh")
+        self.assertEqual(
+            result["rows"],
+            [
+                {"lid": "1", "text": "你好。", "begin": 200, "end": 500},
+                {"lid": "2", "text": "世界。", "begin": 600, "end": 900},
+            ],
+        )
+        self.assertEqual(
+            calls,
+            [
+                ("native-diarized-asr", "sample.wav", False),
+                ("align", "你好。世界。", "Chinese"),
+            ],
+        )
+
+    def test_adapter_keeps_whole_audio_asr_when_diarize_is_disabled(self) -> None:
         calls = []
 
         class FakeService:
@@ -75,28 +156,24 @@ class ContractTests(unittest.TestCase):
                 calls.append(("align", text, language))
                 return {"segments": [{"start": 0.2, "end": 0.9, "text": "你好"}]}
 
-            def diarization_only(self, _path: str):
-                calls.append("diarization")
-                return {"segments": [{"start": 0.0, "end": 1.0, "speaker": "speaker-x"}]}
-
         result = transcribe_platform_audio(
-            FakeService(), "sample.wav", language="Chinese", diarize=True,
+            FakeService(), "sample.wav", language="Chinese", diarize=False,
             max_chars=40, split_by_punctuation=True,
-            config={"v1_default_language": "Chinese", "v1_diarization_fallback": True},
+            config={"v1_default_language": "Chinese", "v1_diarization_fallback": False},
         )
-        self.assertEqual(result["language"], "zh")
         self.assertEqual(result["rows"], [{"lid": "1", "text": "你好。", "begin": 200, "end": 900}])
-        self.assertEqual(calls, ["asr", ("align", "你好。", "Chinese"), "diarization"])
+        self.assertEqual(calls, ["asr", ("align", "你好。", "Chinese")])
 
     def test_diarization_failure_is_not_hidden_when_fallback_is_disabled(self) -> None:
         class FakeService:
-            def asr_raw(self, _path: str):
-                return {"text": "你好。", "language": "Chinese"}
-
-            def forced_align(self, _path: str, text: str, language: str):
-                return {"segments": [{"start": 0.2, "end": 0.9, "text": text}]}
-
-            def diarization_only(self, _path: str):
+            def transcribe_diarized_segments(
+                self,
+                _path: str,
+                _input_filename: str,
+                *,
+                allow_diarization_fallback: bool,
+            ):
+                self.allow_diarization_fallback = allow_diarization_fallback
                 raise RuntimeError("TargetDiarization unavailable")
 
         with self.assertRaisesRegex(RuntimeError, "TargetDiarization unavailable"):
