@@ -62,6 +62,15 @@ Copy-Item -LiteralPath (Join-Path $SnapshotRoot "wxz/migration/rollback_r8_stere
 Copy-Item -LiteralPath (Join-Path $SnapshotRoot "wxz/migration/README_r8_stereo_downmix.md") `
     -Destination (Join-Path $MigrationRoot "README.md")
 
+# Git for Windows may store/export CRLF when core.autocrlf is enabled. Force
+# Linux shell scripts in the migration archive to UTF-8 without BOM and LF only.
+foreach ($ScriptName in @("apply_r8_stereo_downmix.sh", "rollback_r8_stereo_downmix.sh")) {
+    $ScriptPath = Join-Path $MigrationRoot $ScriptName
+    $ScriptText = [System.IO.File]::ReadAllText($ScriptPath)
+    $ScriptText = $ScriptText.Replace("`r`n", "`n").Replace("`r", "`n")
+    [System.IO.File]::WriteAllText($ScriptPath, $ScriptText, $Utf8NoBom)
+}
+
 [System.IO.File]::WriteAllText(
     (Join-Path $PackageRoot "SOURCE_COMMIT.txt"),
     "$ResolvedCommit`n",
@@ -102,4 +111,3 @@ Write-Output "BYTES=$ArchiveSize"
 Write-Output "SHA256=$ArchiveHash"
 Write-Output "SOURCE_COMMIT=$ResolvedCommit"
 Write-Output "STAGE_RETAINED=$StageRoot"
-
