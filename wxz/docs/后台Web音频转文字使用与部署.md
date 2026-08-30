@@ -109,7 +109,7 @@ http://模型服务器内网IP:8885/
 
 1. 确认“服务状态”为“服务就绪”。
 2. 选择音频。
-3. 根据需要选择识别语言、说话人区分和每行最大字符数。
+3. 根据需要选择是否区分说话人；识别语言由新模型自动检测。
 4. 如果服务设置了 `TAILECT_API_KEY`，输入 API Key；它只保存在当前页面内存中。
 5. 点击“开始转写”。
 6. 等待上传和模型处理完成，查看或复制结果。
@@ -128,7 +128,7 @@ API 验证：
 
 ```bash
 curl -sS -X POST \
-  'http://127.0.0.1:8885/v1/audiototext?model=Tailect_V4.1&language=auto&diarize=0&max_chars=40' \
+  'http://127.0.0.1:8885/v1/audiototext?model=Tailect_V4.1&diarize=0' \
   -F 'file=@/path/to/audio.wav;type=audio/wav'
 ```
 

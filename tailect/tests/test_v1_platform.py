@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import tempfile
@@ -20,7 +21,12 @@ from core.audio_input import (
 from core.translator_store import TranslatorStore
 from core.security import RateLimiter, authorize, resolve_client_ip
 from core.v1_adapter import FifoInferenceQueue, transcribe_platform_audio
-from core.v1_contract import V1ApiError, build_caption_rows, require_model_alias
+from core.v1_contract import (
+    V1ApiError,
+    build_caption_rows,
+    reject_removed_v1_parameters,
+    require_model_alias,
+)
 
 
 RUNTIME_ROOT = Path(__file__).resolve().parents[1] / "outputs" / "test_v1_platform"
@@ -45,7 +51,6 @@ class ContractTests(unittest.TestCase):
                 {"start": 0.0, "end": 0.55, "speaker": "speaker-a"},
                 {"start": 0.55, "end": 1.2, "speaker": "speaker-b"},
             ],
-            max_chars=40,
             split_by_punctuation=True,
         )
         self.assertEqual(rows[0], {"lid": "1", "text": "你好，", "begin": 100, "end": 500})
@@ -58,7 +63,6 @@ class ContractTests(unittest.TestCase):
                 {"start": 0.0, "end": 0.8, "text": "こんにちは"},
                 {"start": 0.9, "end": 1.8, "text": "안녕하세요"},
             ],
-            max_chars=40,
             split_by_punctuation=True,
         )
         self.assertEqual(len(rows), 2)
@@ -76,7 +80,6 @@ class ContractTests(unittest.TestCase):
                 {"start": 0.0, "end": 0.55, "speaker": "speaker-a", "text": "你好"},
                 {"start": 0.55, "end": 1.2, "speaker": "speaker-b", "text": "世界"},
             ],
-            max_chars=40,
             split_by_punctuation=False,
         )
         self.assertEqual(
@@ -126,9 +129,9 @@ class ContractTests(unittest.TestCase):
                 }
 
         result = transcribe_platform_audio(
-            FakeService(), "sample.wav", language="Chinese", diarize=True,
-            max_chars=40, split_by_punctuation=True,
-            config={"v1_default_language": "Chinese", "v1_diarization_fallback": False},
+            FakeService(), "sample.wav", diarize=True,
+            split_by_punctuation=True,
+            config={"v1_alignment_fallback_language": "Chinese", "v1_diarization_fallback": False},
         )
         self.assertEqual(result["language"], "zh")
         self.assertEqual(
@@ -159,9 +162,9 @@ class ContractTests(unittest.TestCase):
                 return {"segments": [{"start": 0.2, "end": 0.9, "text": "你好"}]}
 
         result = transcribe_platform_audio(
-            FakeService(), "sample.wav", language="Chinese", diarize=False,
-            max_chars=40, split_by_punctuation=True,
-            config={"v1_default_language": "Chinese", "v1_diarization_fallback": False},
+            FakeService(), "sample.wav", diarize=False,
+            split_by_punctuation=True,
+            config={"v1_alignment_fallback_language": "Chinese", "v1_diarization_fallback": False},
         )
         self.assertEqual(result["rows"], [{"lid": "1", "text": "你好。", "begin": 200, "end": 900}])
         self.assertEqual(calls, ["asr", ("align", "你好。", "Chinese")])
@@ -180,10 +183,21 @@ class ContractTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "TargetDiarization unavailable"):
             transcribe_platform_audio(
-                FakeService(), "sample.wav", language="Chinese", diarize=True,
-                max_chars=40, split_by_punctuation=True,
-                config={"v1_default_language": "Chinese", "v1_diarization_fallback": False},
+                FakeService(), "sample.wav", diarize=True,
+                split_by_punctuation=True,
+                config={"v1_alignment_fallback_language": "Chinese", "v1_diarization_fallback": False},
             )
+
+    def test_removed_max_chars_parameter_is_rejected(self) -> None:
+        with self.assertRaises(V1ApiError) as raised:
+            reject_removed_v1_parameters({"max_chars": "40"})
+        self.assertEqual(raised.exception.error_id, "E017")
+
+    def test_request_language_is_accepted_but_not_forwarded_to_adapter(self) -> None:
+        reject_removed_v1_parameters(
+            {"model": "Tailect_V4.1", "language": "English", "diarize": "1"}
+        )
+        self.assertNotIn("language", inspect.signature(transcribe_platform_audio).parameters)
 
 
 class AllowlistTests(unittest.TestCase):

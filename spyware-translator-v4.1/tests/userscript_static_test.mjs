@@ -9,10 +9,12 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.resolve(here, '..', 'spyware-translator-v4.1.user.js');
 const source = await readFile(scriptPath, 'utf8');
 
-assert.match(source, /@version\s+0\.5\.1/);
+assert.match(source, /@version\s+0\.5\.2/);
 assert.match(source, /modelBaseUrl:\s*'http:\/\/127\.0\.0\.1:8885'/);
 assert.match(source, /model:\s*'Tailect_V4\.1'/);
 assert.match(source, /\/v1\/audiototext/);
+assert.doesNotMatch(source, /[?&]max_chars=/);
+assert.doesNotMatch(source, /[?&]language=/);
 assert.match(source, /\/translator\/csv/);
 assert.match(source, /actualModel === 'Tailect_V4\.1'/);
 assert.match(source, /function downmixPcmToMono/);

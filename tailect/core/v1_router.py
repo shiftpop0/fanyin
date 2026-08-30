@@ -30,8 +30,7 @@ from core.v1_contract import (
     V1ApiError,
     error_body,
     parse_bool,
-    parse_int,
-    request_language_to_internal,
+    reject_removed_v1_parameters,
     require_model_alias,
     response_body,
 )
@@ -111,6 +110,7 @@ class PlatformApi:
                 for key, value in form.items():
                     if not isinstance(value, UploadFile):
                         params[key] = value
+                reject_removed_v1_parameters(params)
                 self._guard(request, params)
                 expected_model = str(self.config.get("model_alias") or "Tailect_V4.1")
                 require_model_alias(params.get("model"), expected=expected_model)
@@ -144,16 +144,7 @@ class PlatformApi:
                         allowlist=self.allowlist,
                     )
 
-                language = request_language_to_internal(
-                    params.get("language"), str(self.config.get("v1_default_language") or "Chinese")
-                )
                 diarize = parse_bool(params.get("diarize"), False)
-                max_chars = parse_int(
-                    params.get("max_chars"),
-                    int(self.config.get("v1_default_max_chars", 40)),
-                    1,
-                    500,
-                )
                 split_by_punctuation = parse_bool(
                     params.get("split_by_punctuation"),
                     bool(self.config.get("v1_split_by_punctuation", True)),
@@ -166,9 +157,7 @@ class PlatformApi:
                         transcribe_platform_audio,
                         service,
                         str(audio_path),
-                        language=language,
                         diarize=diarize,
-                        max_chars=max_chars,
                         split_by_punctuation=split_by_punctuation,
                         config=self.config,
                     )

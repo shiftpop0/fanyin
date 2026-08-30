@@ -19,7 +19,7 @@ call_platform() {
     local diarize="$1"
     local output_file="$2"
     curl --fail-with-body -sS -X POST \
-        "http://127.0.0.1:8885/v1/audiototext?model=Tailect_V4.1&diarize=${diarize}&language=auto&max_chars=40" \
+        "http://127.0.0.1:8885/v1/audiototext?model=Tailect_V4.1&diarize=${diarize}" \
         -H 'Accept: application/json' \
         -F "file=${TEST_AUDIO_URL}" \
         -o "$output_file"

@@ -134,7 +134,7 @@ curl http://127.0.0.1:8885/health
 
 ```bash
 curl -X POST \
-  'http://127.0.0.1:8885/v1/audiototext?model=Tailect_V4.1&diarize=0&language=auto&max_chars=40' \
+  'http://127.0.0.1:8885/v1/audiototext?model=Tailect_V4.1&diarize=0' \
   -H 'Accept: application/json' \
   -H 'X-API-Key: 现场密钥' \
   -F 'file=@audio.wav;type=audio/wav'
@@ -147,13 +147,15 @@ curl -X POST \
 | `model` | 无 | 必填且只能为 `Tailect_V4.1`；也兼容写法 `v4.1` |
 | `file` | 无 | multipart 音频文件，或 form/query 中的完整 WAV URL |
 | `diarize` | `0` | `1` 时复用 6006 原生的 TargetDiarization 分段批量 ASR，再按说话人边界生成 `lid`；`0` 保持整段 ASR |
-| `language` | `auto` | `zh/en/ja/ko/yue/auto`，模型报告语言优先 |
-| `max_chars` | `40` | 字幕行聚合的软长度上限，范围 1–500 |
+| `language` | — | 仅为旧客户端兼容而接收，服务端忽略其值，不参与识别或对齐 |
 | `split_by_punctuation` | `1` | 按中英文标点切字幕行 |
+
+旧版扩展的 `max_chars` 已移除；若旧客户端仍发送该参数，接口返回业务错误 `E017`。
+`split_by_punctuation` 属于 8885 响应字幕整形能力，并非原生 6006 `/asr` 参数。
 
 非 WAV 上传会由离线 ffmpeg 转换为 16kHz 单声道 WAV。对于文件头有效的 WAV，R9
 服务端不会主动做双声道合并；浏览器采集得到的多声道 PCM WAV 由 V4.1 油猴脚本
-`0.5.1` 在 Windows 本机合并后再上传。扩展名为 `.wav` 但文件头非法会直接拒绝；
+`0.5.2` 在 Windows 本机合并后再上传。扩展名为 `.wav` 但文件头非法会直接拒绝；
 `.sdp` 仅作为“内容确实为 WAV”的业务文件名兼容，不解析 SDP 协议。
 
 ### 4.2 URL 输入
@@ -185,7 +187,7 @@ HTTP 状态始终为 200；业务状态看 body 的 `code`：
 时间戳来自项目本地 `Qwen3-ForcedAligner-0.6B`。对齐失败、没有时间戳、时间戳
 无效，或对齐结果不能覆盖完整识别文本时返回 `E016`，不返回缺尾的部分成功结果，
 不生成全零时间戳，也不联网寻找替代模型。`diarize=1` 时说话人变化是字幕硬边界，
-`max_chars` 和标点仅在同一说话人内部继续分行。
+标点仅在同一说话人内部继续分行。
 
 ### 4.4 失败响应
 
@@ -212,6 +214,7 @@ HTTP 状态始终为 200；业务状态看 body 的 `code`：
 | `E011` / `E012` | FIFO 队列已满 / 等待超时 |
 | `E013`–`E015` | URL 非法、下载失败、响应不是 WAV |
 | `E016` | 本地 ForcedAligner 未返回时间戳 |
+| `E017` | 请求包含已移除的 `max_chars` 参数 |
 | `E020`–`E022` | CSV 不存在、JSON 非法、修正行不存在 |
 
 ## 5. CSV 与人工修正 API

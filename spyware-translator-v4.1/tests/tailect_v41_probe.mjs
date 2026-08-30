@@ -32,6 +32,12 @@ async function main() {
 
   await expectServiceError('missing model', '/v1/audiototext', new FormData(), 'E001');
   await expectServiceError('unsupported model', '/v1/audiototext?model=BadModel', new FormData(), 'E002');
+  await expectServiceError(
+    'removed max_chars',
+    `/v1/audiototext?model=${encodeURIComponent(model)}&max_chars=40`,
+    new FormData(),
+    'E017',
+  );
 
   const missingFileForm = new FormData();
   missingFileForm.append('model', model);
@@ -45,7 +51,11 @@ async function main() {
   const form = new FormData();
   form.append('file', new Blob([bytes], { type: 'audio/wav' }), path.basename(audioPath));
 
-  const payload = await postJson(`/v1/audiototext?model=${encodeURIComponent(model)}`, form, 10 * 60 * 1000);
+  const payload = await postJson(
+    `/v1/audiototext?model=${encodeURIComponent(model)}&language=compatibility-probe-ignored`,
+    form,
+    10 * 60 * 1000,
+  );
   assertSuccessPayload(payload);
 
   console.log(`[v1-probe] code: ${payload.code}`);

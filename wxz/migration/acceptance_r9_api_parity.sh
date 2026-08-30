@@ -44,7 +44,7 @@ curl -fsS --max-time 1200 -X POST \
     -o "$RESULT_ROOT/result_6006.json"
 
 curl -fsS --max-time 1200 -X POST \
-    "${SERVER_BASE}:8885/v1/audiototext?model=Tailect_V4.1&diarize=1&language=auto&max_chars=40" \
+    "${SERVER_BASE}:8885/v1/audiototext?model=Tailect_V4.1&diarize=1" \
     -F "file=@${TEST_AUDIO_FILE};type=audio/wav" \
     -o "$RESULT_ROOT/result_8885.json"
 

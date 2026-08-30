@@ -6,9 +6,7 @@ import {
   Card,
   ConfigProvider,
   Input,
-  InputNumber,
   Progress,
-  Select,
   Space,
   Spin,
   Switch,
@@ -42,15 +40,6 @@ import './styles.css'
 
 type Phase = 'idle' | 'uploading' | 'processing' | 'success' | 'error'
 
-const LANGUAGE_OPTIONS = [
-  { value: 'auto', label: '自动（默认中文）' },
-  { value: 'zh', label: '中文' },
-  { value: 'yue', label: '粤语' },
-  { value: 'en', label: '英语' },
-  { value: 'ja', label: '日语' },
-  { value: 'ko', label: '韩语' },
-]
-
 function TranscriptionPage() {
   const { message } = AntApp.useApp()
   const { token } = theme.useToken()
@@ -59,9 +48,7 @@ function TranscriptionPage() {
   const [healthLoading, setHealthLoading] = useState(false)
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [fileList, setFileList] = useState<UploadFile[]>([])
-  const [language, setLanguage] = useState('auto')
   const [diarize, setDiarize] = useState(false)
-  const [maxChars, setMaxChars] = useState(40)
   const [apiKey, setApiKey] = useState('')
   const [phase, setPhase] = useState<Phase>('idle')
   const [uploadPercent, setUploadPercent] = useState(0)
@@ -154,9 +141,7 @@ function TranscriptionPage() {
     try {
       const response = await transcribeAudio({
         file: audioFile,
-        language,
         diarize,
-        maxChars,
         apiKey,
         onUploadProgress: (loaded, total, percent) => {
           setUploadedBytes(loaded)
@@ -303,26 +288,6 @@ function TranscriptionPage() {
               </Upload.Dragger>
 
               <div className="option-grid">
-                <label className="field-block">
-                  <Typography.Text strong>识别语言</Typography.Text>
-                  <Select
-                    value={language}
-                    options={LANGUAGE_OPTIONS}
-                    disabled={busy}
-                    onChange={setLanguage}
-                  />
-                </label>
-                <label className="field-block">
-                  <Typography.Text strong>每行最大字符数</Typography.Text>
-                  <InputNumber
-                    value={maxChars}
-                    min={1}
-                    max={500}
-                    precision={0}
-                    disabled={busy}
-                    onChange={(value) => setMaxChars(typeof value === 'number' ? value : 40)}
-                  />
-                </label>
                 <label className="switch-field">
                   <Typography.Text strong>区分说话人</Typography.Text>
                   <Switch

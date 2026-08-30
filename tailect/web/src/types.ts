@@ -32,9 +32,7 @@ export interface TranscriptionResponse {
 
 export interface TranscriptionOptions {
   file: File
-  language: string
   diarize: boolean
-  maxChars: number
   apiKey?: string
   onUploadProgress?: (loaded: number, total: number, percent: number) => void
   onProcessing?: () => void

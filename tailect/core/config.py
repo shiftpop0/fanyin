@@ -93,8 +93,9 @@ CONFIG: Dict[str, Any] = {
     "v1_queue_max_size": 128,
     "v1_rate_limit_per_minute": 60,
     "v1_api_key_env": "TAILECT_API_KEY",
-    "v1_default_language": "Chinese",
-    "v1_default_max_chars": 40,
+    # Request language is accepted for compatibility but ignored. This is only
+    # used when the native model returns no language for ForcedAligner.
+    "v1_alignment_fallback_language": "Chinese",
     "v1_split_by_punctuation": True,
     # 平台要求 diarize=1 必须真正完成说话人分离；失败时返回错误，禁止伪装成单说话人。
     "v1_diarization_fallback": False,

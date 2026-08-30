@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Spyware 语音方言转普通话悬浮展示（Tailect V4.1）
 // @namespace    local.spyware-translator-v4.1
-// @version      0.5.1
+// @version      0.5.2
 // @description  捕获 spyware 页面语音切片，通过离线 8885 平台 API 调用 Tailect_V4.1，保存 CSV，并在列表/VX 页面展示和修正。
 // @match        http://spyware.zj.jz/*
 // @match        https://spyware.zj.jz/*
@@ -17,7 +17,7 @@
   'use strict';
 
   const STORAGE_KEY = 'tailect_asr_translator_v41_settings';
-  const SETTINGS_SCHEMA_VERSION = 3;
+  const SETTINGS_SCHEMA_VERSION = 4;
   const PANEL_ID = 'tailect-v41-translator-panel';
   const MODAL_ID = 'tailect-v41-translator-modal';
   const TOAST_ID = 'tailect-v41-translator-toasts';
@@ -59,10 +59,8 @@
     apiKey: '',
     localHelperUrl: 'http://127.0.0.1:18885',
     localOutputDir: 'C:\\fanyin_output',
-    language: 'auto',
     diarize: false,
     autoTranscribe: true,
-    maxChars: 40,
     maxMergeMinutes: 10,
     maxSliceCount: 0,
     sliceFailLimit: 2,
@@ -152,6 +150,8 @@
     }
     merged.settingsSchemaVersion = SETTINGS_SCHEMA_VERSION;
     delete merged.speakerCount;
+    delete merged.maxChars;
+    delete merged.language;
     delete merged.__testSaveFilePicker;
     delete merged.__disableNativeSaveFilePicker;
     delete merged.__testBrowserDownload;
@@ -575,7 +575,6 @@
     settings.maxSliceCount = Math.max(0, Number(value('maxSliceCount')) || 0);
     settings.sliceFailLimit = Math.max(1, Number(value('sliceFailLimit')) || 2);
     settings.transcriptColumnWidth = Math.max(240, Number(value('transcriptColumnWidth')) || 420);
-    settings.maxChars = Math.max(1, Number(value('maxChars')) || 40);
     settings.feedbackHistory = Boolean(root.querySelector('[name="feedbackHistory"]')?.checked);
   }
 
@@ -1035,7 +1034,7 @@
   async function callV1Api(buffer, filename) {
     const form = new FormData();
     form.append('file', new Blob([buffer], { type: 'audio/wav' }), filename);
-    const url = `${settings.modelBaseUrl}/v1/audiototext?model=${encodeURIComponent(settings.model)}&diarize=${settings.diarize ? '1' : '0'}&language=${encodeURIComponent(settings.language || 'auto')}&max_chars=${encodeURIComponent(String(settings.maxChars || 40))}`;
+    const url = `${settings.modelBaseUrl}/v1/audiototext?model=${encodeURIComponent(settings.model)}&diarize=${settings.diarize ? '1' : '0'}`;
     const headers = { Accept: 'application/json' };
     if (settings.apiKey) headers['X-API-Key'] = settings.apiKey;
     const response = await httpRequest({
@@ -1367,8 +1366,6 @@
             <input name="sliceFailLimit" type="number" min="1" value="${escAttr(settings.sliceFailLimit)}">
             <div class="tm-field-label">识别内容列宽 <span class="tm-info" title="普通语音列表新增的“识别内容”列宽度，单位为像素。">i</span></div>
             <input name="transcriptColumnWidth" type="number" min="240" value="${escAttr(settings.transcriptColumnWidth)}">
-            <div class="tm-field-label">单行最大字数</div>
-            <input name="maxChars" type="number" min="1" value="${escAttr(settings.maxChars)}">
             <div class="tm-field-label">反馈历史 <span class="tm-info" title="开启后额外记录 feedback.jsonl，便于审计和追溯；关闭时仍会直接修正双端 CSV。">i</span></div>
             <label><input name="feedbackHistory" type="checkbox" ${settings.feedbackHistory ? 'checked' : ''}> 记录修正历史（默认关闭）</label>
           </div>

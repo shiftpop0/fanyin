@@ -68,7 +68,7 @@
 核心转写接口：
 
 ```http
-POST /v1/audiototext?model=Tailect_V4.1&diarize=0|1&language=auto&max_chars=40
+POST /v1/audiototext?model=Tailect_V4.1&diarize=0|1
 Content-Type: multipart/form-data
 file=<完整或油猴合并后的音频>
 ```
@@ -185,7 +185,7 @@ file=<HTTP(S) 完整 WAV URL>
    - 直接调用当前 `UnifiedService.forced_align()` / `ForcedAlignWrapper.align()`，使用本地 `model/Qwen3-ForcedAligner-0.6B` 把 ASR 文本对齐为字/词级时间戳。
    - ForcedAligner 是当前项目明确列出的正式组成部分，不作为联网回退；如果本地对齐失败，返回明确错误，不尝试下载、替换或调用其它模型。
 4. `diarize=1` 时调用当前 `DiarizationWrapper`；按字幕时间段与说话人时间段最大重叠分配 `lid`，再按首次出现顺序规范为 `1,2,3...`。
-5. 依据标点和 `max_chars` 聚合字幕行，最终时间统一为整数毫秒，保证单调且 `begin <= end`。
+5. 依据标点聚合字幕行，最终时间统一为整数毫秒，保证单调且 `begin <= end`。
 6. 保持旧合同“业务成功/失败由 body.code 区分”的兼容行为，同时日志记录内部异常与 request UUID，不把堆栈或本机绝对路径返回浏览器。
 
 错误码至少覆盖指南中的 `E001-E015`：缺参、非法模型、超大文件、格式错误、鉴权、空文件、排队超时、模型不匹配、URL 非法、下载失败、非 WAV 等。

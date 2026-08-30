@@ -35,7 +35,7 @@ export function transcribeAudio(options: TranscriptionOptions): Promise<Transcri
     const xhr = new XMLHttpRequest()
     xhr.open(
       'POST',
-      endpoint(buildTranscriptionPath(options.language, options.diarize, options.maxChars)),
+      endpoint(buildTranscriptionPath(options.diarize)),
     )
     // Keep the raw body available for both success and error responses. Browsers
     // throw InvalidStateError when responseText is read with responseType="json".

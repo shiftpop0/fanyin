@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Any, Dict, Iterable, List, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 
 LANGUAGE_TO_V1 = {
@@ -14,16 +14,6 @@ LANGUAGE_TO_V1 = {
     "english": "en",
     "japanese": "ja",
     "korean": "ko",
-}
-
-V1_TO_LANGUAGE = {
-    "zh": "Chinese",
-    "zh-cn": "Chinese",
-    "cmn": "Chinese",
-    "yue": "Cantonese",
-    "en": "English",
-    "ja": "Japanese",
-    "ko": "Korean",
 }
 
 
@@ -83,14 +73,6 @@ def parse_bool(value: Any, default: bool = False) -> bool:
     return bool(default)
 
 
-def parse_int(value: Any, default: int, minimum: int, maximum: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = int(default)
-    return max(int(minimum), min(int(maximum), parsed))
-
-
 def canonical_model_alias(value: Any) -> str:
     text = str(value or "").strip()
     compact = re.sub(r"[^a-z0-9]+", "", text.lower())
@@ -108,11 +90,10 @@ def require_model_alias(value: Any, expected: str = "Tailect_V4.1") -> str:
     return alias
 
 
-def request_language_to_internal(value: Any, default: str = "Chinese") -> str:
-    text = str(value or "auto").strip()
-    if not text or text.lower() == "auto":
-        return str(default or "Chinese")
-    return V1_TO_LANGUAGE.get(text.lower(), text)
+def reject_removed_v1_parameters(params: Mapping[str, Any]) -> None:
+    """Reject parameters removed from the current platform request contract."""
+    if "max_chars" in params:
+        raise V1ApiError("unsupported parameter: max_chars", "E017")
 
 
 def language_to_v1(value: Any) -> str:
@@ -214,7 +195,6 @@ def build_caption_rows(
     full_text: str,
     timestamps: Sequence[Dict[str, Any]],
     speaker_segments: Any = None,
-    max_chars: int = 40,
     split_by_punctuation: bool = True,
 ) -> List[Dict[str, Any]]:
     text = str(full_text or "").strip()
@@ -317,8 +297,7 @@ def build_caption_rows(
         current_text += part
         current_lid = part_lid
         punctuation_end = bool(re.search(r"[，。！？；：,.!?:;\n]\s*$", part))
-        length_overflow = _pure_text_len(current_text) >= max(1, int(max_chars))
-        if hard_boundary or (split_by_punctuation and punctuation_end) or length_overflow:
+        if hard_boundary or (split_by_punctuation and punctuation_end):
             flush()
 
     if current_timestamps or current_text.strip():

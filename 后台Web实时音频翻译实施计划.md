@@ -106,7 +106,7 @@ FastAPI Web 任务层
 
 - `Upload.Dragger` 单文件上传。
 - 显示允许格式、文件大小上限和文件名。
-- 配置项：源语言（默认自动）、是否区分说话人、每行最大字符数。
+- 配置项：是否区分说话人；识别语言由新模型自动检测。
 - 只有确认“真实翻译”后才增加目标语言选择，避免当前没有翻译引擎时出现无效控件。
 - 一个主要按钮“开始转写/翻译”；同一表面不放置多个主按钮。
 
@@ -154,10 +154,8 @@ POST /api/web/jobs
 Content-Type: multipart/form-data
 
 file=<audio>
-source_language=auto
 target_language=<确认真实翻译后启用>
 diarize=false
-max_chars=40
 ```
 
 响应：

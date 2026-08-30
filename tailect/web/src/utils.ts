@@ -37,15 +37,11 @@ export function validateAudioFile(file: FileLike, maxUploadMb: number): string |
 }
 
 export function buildTranscriptionPath(
-  language: string,
   diarize: boolean,
-  maxChars: number,
 ): string {
   const params = new URLSearchParams({
     model: 'Tailect_V4.1',
-    language,
     diarize: diarize ? '1' : '0',
-    max_chars: String(maxChars),
   })
   return `/v1/audiototext?${params.toString()}`
 }

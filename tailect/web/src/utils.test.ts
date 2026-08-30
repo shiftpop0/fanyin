@@ -22,8 +22,8 @@ describe('audio file validation', () => {
 
 describe('request and display helpers', () => {
   it('builds the existing 8885 API contract', () => {
-    expect(buildTranscriptionPath('auto', true, 40)).toBe(
-      '/v1/audiototext?model=Tailect_V4.1&language=auto&diarize=1&max_chars=40',
+    expect(buildTranscriptionPath(true)).toBe(
+      '/v1/audiototext?model=Tailect_V4.1&diarize=1',
     )
   })
 

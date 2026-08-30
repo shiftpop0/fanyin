@@ -54,9 +54,7 @@ def transcribe_platform_audio(
     service: Any,
     audio_path: str,
     *,
-    language: str,
     diarize: bool,
-    max_chars: int,
     split_by_punctuation: bool,
     config: Mapping[str, Any],
 ) -> Dict[str, Any]:
@@ -90,12 +88,14 @@ def transcribe_platform_audio(
 
     if not text:
         return {
-            "language": language_to_v1(detected_language or language),
+            "language": language_to_v1(detected_language),
             "text": "",
             "rows": [],
         }
 
-    align_language = detected_language or language or str(config.get("v1_default_language") or "Chinese")
+    align_language = detected_language or str(
+        config.get("v1_alignment_fallback_language") or "Chinese"
+    )
     aligned = service.forced_align(audio_path, text=text, language=align_language)
     timestamps = aligned.get("segments") or []
 
@@ -103,7 +103,6 @@ def transcribe_platform_audio(
         full_text=text,
         timestamps=timestamps,
         speaker_segments=speakers,
-        max_chars=max_chars,
         split_by_punctuation=split_by_punctuation,
     )
     logger.info(

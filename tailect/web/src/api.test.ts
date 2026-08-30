@@ -39,9 +39,7 @@ describe('transcription API client', () => {
     vi.stubGlobal('XMLHttpRequest', FakeXMLHttpRequest)
     const request = transcribeAudio({
       file: new File(['wav'], 'sample.wav', { type: 'audio/wav' }),
-      language: 'auto',
       diarize: false,
-      maxChars: 40,
     })
     const xhr = FakeXMLHttpRequest.latest
     expect(xhr).not.toBeNull()
