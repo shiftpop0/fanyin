@@ -14,6 +14,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
+import soundfile as sf
+
+from core.logger import logger
 from core.v1_contract import V1ApiError
 
 
@@ -205,9 +208,72 @@ def normalize_uploaded_audio_path(original_name: str, raw_path: Path) -> Path:
 
 
 def ensure_standard_wav(path: Path, timeout_sec: float = 120.0) -> Path:
-    """Return a local WAV path, converting non-WAV media without removing its source."""
+    """Return a model-ready WAV path without removing its source.
+
+    Existing mono WAV files are kept byte-for-byte. Multichannel WAV files are
+    explicitly merged before inference so ASR, ForcedAligner and diarization all
+    consume the same waveform. Channels are summed (rather than averaged) to keep
+    the level of calls where one participant occupies each channel; a limiter
+    prevents clipping when channels overlap.
+    """
     if is_wav_file(path):
-        return path
+        try:
+            info = sf.info(str(path))
+        except Exception as exc:
+            raise V1ApiError(f"unable to inspect WAV audio: {exc}", "E008") from exc
+        channels = int(info.channels)
+        if channels <= 1:
+            return path
+
+        output_path = path.with_name(f"{path.stem}_mono.wav")
+        channel_sum = "+".join(f"c{index}" for index in range(channels))
+        audio_filter = f"pan=mono|c0={channel_sum},alimiter=limit=0.95:level=false"
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-nostdin",
+                    "-i",
+                    str(path),
+                    "-vn",
+                    "-af",
+                    audio_filter,
+                    "-ac",
+                    "1",
+                    "-acodec",
+                    "pcm_s16le",
+                    str(output_path),
+                ],
+                capture_output=True,
+                timeout=max(1.0, float(timeout_sec)),
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise V1ApiError("ffmpeg is required to merge multichannel WAV audio", "E008") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise V1ApiError("audio channel merge timed out", "E008") from exc
+        except OSError as exc:
+            raise V1ApiError(f"audio channel merge failed: {exc}", "E008") from exc
+        if result.returncode != 0 or not output_path.exists() or not is_wav_file(output_path):
+            detail = result.stderr.decode(errors="replace")[-500:].strip()
+            raise V1ApiError(f"audio channel merge failed: {detail or 'invalid ffmpeg output'}", "E008")
+        try:
+            output_info = sf.info(str(output_path))
+        except Exception as exc:
+            raise V1ApiError(f"unable to inspect merged WAV audio: {exc}", "E008") from exc
+        if int(output_info.channels) != 1:
+            raise V1ApiError("audio channel merge did not produce mono WAV", "E008")
+        logger.info(
+            "[AUDIO] merged %s channels to mono: sample_rate=%s duration=%.3fs input=%s output=%s",
+            channels,
+            int(info.samplerate),
+            float(info.duration),
+            path,
+            output_path,
+        )
+        return output_path
+
     output_path = path.with_name(f"{path.stem}_converted.wav")
     try:
         result = subprocess.run(

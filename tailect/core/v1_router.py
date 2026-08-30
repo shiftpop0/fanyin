@@ -124,12 +124,7 @@ class PlatformApi:
                     validate_upload_filename(original_name)
                     raw_path = request_dir / safe_upload_name(original_name, request_id)
                     await save_upload_limited(upload, raw_path, limit_bytes)
-                    raw_path = normalize_uploaded_audio_path(original_name, raw_path)
-                    audio_path = await asyncio.to_thread(
-                        ensure_standard_wav,
-                        raw_path,
-                        float(self.config.get("v1_audio_convert_timeout_sec", 120)),
-                    )
+                    audio_path = normalize_uploaded_audio_path(original_name, raw_path)
                 else:
                     original_name, audio_path = await asyncio.to_thread(
                         download_wav_url,
@@ -140,6 +135,14 @@ class PlatformApi:
                         max_redirects=int(self.config.get("audio_url_max_redirects", 5)),
                         allowlist=self.allowlist,
                     )
+                # Normalize both multipart uploads and downloaded URL inputs. In
+                # particular, explicitly merge stereo call recordings before any
+                # model component sees the audio.
+                audio_path = await asyncio.to_thread(
+                    ensure_standard_wav,
+                    audio_path,
+                    float(self.config.get("v1_audio_convert_timeout_sec", 120)),
+                )
 
                 language = request_language_to_internal(
                     params.get("language"), str(self.config.get("v1_default_language") or "Chinese")
