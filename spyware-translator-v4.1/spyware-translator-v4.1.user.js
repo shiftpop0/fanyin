@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Spyware 语音方言转普通话悬浮展示（Tailect V4.1）
 // @namespace    local.spyware-translator-v4.1
-// @version      0.5.0
+// @version      0.5.1
 // @description  捕获 spyware 页面语音切片，通过离线 8885 平台 API 调用 Tailect_V4.1，保存 CSV，并在列表/VX 页面展示和修正。
 // @match        http://spyware.zj.jz/*
 // @match        https://spyware.zj.jz/*
@@ -771,6 +771,7 @@
       text: '',
       error: '',
       audioBlobUrl: '',
+      audioChannelText: '',
       audioIndexRange: '',
       hasLocalCsv: false,
       localCsvText: '',
@@ -867,6 +868,7 @@
     primary.manualAttempted = primary.manualAttempted || duplicate.manualAttempted;
     primary.autoQueued = primary.autoQueued || duplicate.autoQueued;
     primary.audioBlobUrl = primary.audioBlobUrl || duplicate.audioBlobUrl;
+    primary.audioChannelText = primary.audioChannelText || duplicate.audioChannelText;
     primary.audioIndexRange = primary.audioIndexRange || duplicate.audioIndexRange;
     primary.title = buildTaskTitle(primary.context, primary.audio);
     primary.csvFilename = buildCsvFilename(primary.context, primary.audio);
@@ -936,6 +938,9 @@
     const merged = mergeWavBuffers(slices.map((item) => item.buffer), settings.maxMergeMinutes);
     if (task.audioBlobUrl) URL.revokeObjectURL(task.audioBlobUrl);
     task.audioBlobUrl = URL.createObjectURL(new Blob([merged.fullBuffer], { type: 'audio/wav' }));
+    task.audioChannelText = merged.sourceChannels > 1
+      ? `${merged.sourceChannels} 声道已在本机合并为单声道`
+      : '原音频为单声道';
 
     const allSegments = [];
     const speakerLabels = new Map();
@@ -1848,7 +1853,7 @@
     const isBusy = ['queued', 'downloading', 'merging', 'transcribing', 'saving'].includes(task.status);
     body.innerHTML = `
       ${task.audioBlobUrl ? `<audio controls src="${escAttr(task.audioBlobUrl)}"></audio>` : ''}
-      <div class="tm-help">CSV：${esc(task.csvFilename)}；切片：${esc(task.audioIndexRange || '')}</div>
+      <div class="tm-help">CSV：${esc(task.csvFilename)}；切片：${esc(task.audioIndexRange || '')}；音频：${esc(task.audioChannelText || '等待本机处理')}</div>
       ${isBusy ? `<div class="tm-loading">${esc(task.message || STATUS_LABELS[task.status] || '处理中')}</div>` : ''}
       <div class="tm-actions" style="margin:8px 0">
         <button type="button" data-tm-action="retry" data-key="${escAttr(task.key)}">重新识别</button>
@@ -2044,14 +2049,12 @@
   function mergeWavBuffers(buffers, maxMinutes) {
     const parsed = buffers.map(parseWav).filter(Boolean);
     if (parsed.length !== buffers.length) {
-      const full = buffers[0];
-      return { fullBuffer: full, parts: [{ buffer: full, offsetMs: 0 }] };
+      throw new Error('音频切片不是受支持的 PCM WAV，无法在本机合并声道');
     }
     const first = parsed[0];
     const same = parsed.every((item) => item.audioFormat === first.audioFormat && item.channels === first.channels && item.sampleRate === first.sampleRate && item.bitsPerSample === first.bitsPerSample);
     if (!same) {
-      const full = buffers[0];
-      return { fullBuffer: full, parts: [{ buffer: full, offsetMs: 0 }] };
+      throw new Error('音频切片格式不一致，无法安全拼接和合并声道');
     }
     const totalBytes = parsed.reduce((sum, item) => sum + item.data.byteLength, 0);
     const pcm = new Uint8Array(totalBytes);
@@ -2060,22 +2063,107 @@
       pcm.set(new Uint8Array(item.data), pos);
       pos += item.data.byteLength;
     });
-    const fullBuffer = makeWav(first, pcm.buffer);
-    const maxBytesRaw = first.byteRate * Math.max(1, Number(maxMinutes || 10)) * 60;
-    const maxBytes = Math.max(first.blockAlign, Math.floor(maxBytesRaw / first.blockAlign) * first.blockAlign);
+    const mono = downmixPcmToMono(first, pcm.buffer);
+    const fullBuffer = makeWav(mono.fmt, mono.data);
+    const maxBytesRaw = mono.fmt.byteRate * Math.max(1, Number(maxMinutes || 10)) * 60;
+    const maxBytes = Math.max(mono.fmt.blockAlign, Math.floor(maxBytesRaw / mono.fmt.blockAlign) * mono.fmt.blockAlign);
     const parts = [];
     let offsetBytes = 0;
-    while (offsetBytes < pcm.byteLength) {
-      const end = Math.min(pcm.byteLength, offsetBytes + maxBytes);
-      const alignedEnd = end < pcm.byteLength ? Math.max(offsetBytes + first.blockAlign, Math.floor(end / first.blockAlign) * first.blockAlign) : end;
-      const data = pcm.slice(offsetBytes, alignedEnd);
+    const monoBytes = new Uint8Array(mono.data);
+    while (offsetBytes < monoBytes.byteLength) {
+      const end = Math.min(monoBytes.byteLength, offsetBytes + maxBytes);
+      const alignedEnd = end < monoBytes.byteLength ? Math.max(offsetBytes + mono.fmt.blockAlign, Math.floor(end / mono.fmt.blockAlign) * mono.fmt.blockAlign) : end;
+      const data = monoBytes.slice(offsetBytes, alignedEnd);
       parts.push({
-        buffer: makeWav(first, data.buffer),
-        offsetMs: Math.round((offsetBytes / first.byteRate) * 1000),
+        buffer: makeWav(mono.fmt, data.buffer),
+        offsetMs: Math.round((offsetBytes / mono.fmt.byteRate) * 1000),
       });
       offsetBytes = alignedEnd;
     }
-    return { fullBuffer, parts };
+    return { fullBuffer, parts, sourceChannels: first.channels, outputChannels: mono.fmt.channels };
+  }
+
+  function downmixPcmToMono(fmt, dataBuffer) {
+    if (fmt.channels <= 1) return { fmt: { ...fmt }, data: dataBuffer.slice(0) };
+    const bytesPerSample = fmt.bitsPerSample / 8;
+    const supported = (
+      (fmt.audioFormat === 1 && [1, 2, 3, 4].includes(bytesPerSample)) ||
+      (fmt.audioFormat === 3 && bytesPerSample === 4)
+    );
+    if (!supported || fmt.blockAlign < bytesPerSample * fmt.channels) {
+      throw new Error(`不支持的 WAV 采样格式：format=${fmt.audioFormat}, bits=${fmt.bitsPerSample}, channels=${fmt.channels}`);
+    }
+
+    const source = new DataView(dataBuffer);
+    const frameCount = Math.floor(dataBuffer.byteLength / fmt.blockAlign);
+    let peak = 0;
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      let mixed = 0;
+      const frameOffset = frame * fmt.blockAlign;
+      for (let channel = 0; channel < fmt.channels; channel += 1) {
+        mixed += readPcmSample(source, frameOffset + channel * bytesPerSample, fmt.audioFormat, fmt.bitsPerSample);
+      }
+      peak = Math.max(peak, Math.abs(mixed));
+    }
+
+    const gain = peak > 0.95 ? 0.95 / peak : 1;
+    const output = new ArrayBuffer(frameCount * bytesPerSample);
+    const target = new DataView(output);
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      let mixed = 0;
+      const frameOffset = frame * fmt.blockAlign;
+      for (let channel = 0; channel < fmt.channels; channel += 1) {
+        mixed += readPcmSample(source, frameOffset + channel * bytesPerSample, fmt.audioFormat, fmt.bitsPerSample);
+      }
+      writePcmSample(target, frame * bytesPerSample, mixed * gain, fmt.audioFormat, fmt.bitsPerSample);
+    }
+
+    const monoFmt = {
+      ...fmt,
+      channels: 1,
+      blockAlign: bytesPerSample,
+      byteRate: fmt.sampleRate * bytesPerSample,
+    };
+    return { fmt: monoFmt, data: output };
+  }
+
+  function readPcmSample(view, offset, audioFormat, bitsPerSample) {
+    if (audioFormat === 3 && bitsPerSample === 32) return view.getFloat32(offset, true);
+    if (bitsPerSample === 8) return (view.getUint8(offset) - 128) / 128;
+    if (bitsPerSample === 16) return view.getInt16(offset, true) / 32768;
+    if (bitsPerSample === 24) {
+      let value = view.getUint8(offset) | (view.getUint8(offset + 1) << 8) | (view.getUint8(offset + 2) << 16);
+      if (value & 0x800000) value |= 0xff000000;
+      return value / 8388608;
+    }
+    if (bitsPerSample === 32) return view.getInt32(offset, true) / 2147483648;
+    throw new Error(`不支持的 PCM 位深：${bitsPerSample}`);
+  }
+
+  function writePcmSample(view, offset, sample, audioFormat, bitsPerSample) {
+    const value = Math.max(-1, Math.min(0.999999, Number.isFinite(sample) ? sample : 0));
+    if (audioFormat === 3 && bitsPerSample === 32) {
+      view.setFloat32(offset, value, true);
+      return;
+    }
+    if (bitsPerSample === 8) {
+      view.setUint8(offset, Math.max(0, Math.min(255, Math.round(value * 128 + 128))));
+      return;
+    }
+    const positiveScale = bitsPerSample === 16 ? 32767 : (bitsPerSample === 24 ? 8388607 : 2147483647);
+    const negativeScale = bitsPerSample === 16 ? 32768 : (bitsPerSample === 24 ? 8388608 : 2147483648);
+    const integer = Math.round(value * (value < 0 ? negativeScale : positiveScale));
+    if (bitsPerSample === 16) {
+      view.setInt16(offset, integer, true);
+    } else if (bitsPerSample === 24) {
+      view.setUint8(offset, integer & 0xff);
+      view.setUint8(offset + 1, (integer >> 8) & 0xff);
+      view.setUint8(offset + 2, (integer >> 16) & 0xff);
+    } else if (bitsPerSample === 32) {
+      view.setInt32(offset, integer, true);
+    } else {
+      throw new Error(`不支持的 PCM 位深：${bitsPerSample}`);
+    }
   }
 
   function parseWav(buffer) {
@@ -2102,7 +2190,11 @@
       }
       offset = start + size + (size % 2);
     }
-    if (!fmt || !data || fmt.audioFormat !== 1) return null;
+    const supported = fmt && (
+      (fmt.audioFormat === 1 && [8, 16, 24, 32].includes(fmt.bitsPerSample)) ||
+      (fmt.audioFormat === 3 && fmt.bitsPerSample === 32)
+    );
+    if (!supported || !data) return null;
     return { ...fmt, data };
   }
 
