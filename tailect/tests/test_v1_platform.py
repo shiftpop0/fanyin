@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ from unittest.mock import patch
 from core.audio_input import (
     HotReloadAllowlist,
     audio_url_host_allowed,
+    cleanup_request_uploads,
     download_wav_url,
     validate_audio_url,
 )
@@ -185,6 +187,37 @@ class ContractTests(unittest.TestCase):
 
 
 class AllowlistTests(unittest.TestCase):
+    def test_completed_request_uploads_are_not_retained(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="upload_cleanup_", dir=RUNTIME_ROOT))
+        request_dir = root / "request-id"
+        request_dir.mkdir()
+        (request_dir / "audio.wav").write_bytes(b"transient")
+        (request_dir / "audio_converted.wav").write_bytes(b"transient-converted")
+
+        cleanup_request_uploads(request_dir, root)
+
+        self.assertFalse(request_dir.exists())
+
+    def test_upload_cleanup_refuses_paths_outside_direct_root(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="upload_cleanup_root_", dir=RUNTIME_ROOT))
+        outside = Path(tempfile.mkdtemp(prefix="upload_cleanup_outside_", dir=RUNTIME_ROOT))
+        with self.assertRaises(ValueError):
+            cleanup_request_uploads(outside, root)
+
+    def test_upload_cleanup_refuses_nested_directories_without_partial_cleanup(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="upload_cleanup_nested_", dir=RUNTIME_ROOT))
+        request_dir = root / "request-id"
+        nested = request_dir / "unexpected"
+        nested.mkdir(parents=True)
+        audio_path = request_dir / "audio.wav"
+        audio_path.write_bytes(b"transient")
+
+        with self.assertRaises(OSError):
+            cleanup_request_uploads(request_dir, root)
+
+        self.assertTrue(audio_path.exists())
+        self.assertTrue(nested.exists())
+
     def test_matching_rules_and_hot_reload_fail_closed(self) -> None:
         self.assertTrue(audio_url_host_allowed("audio.internal", ["audio.internal"]))
         self.assertTrue(audio_url_host_allowed("a.media.internal", ["*.media.internal"]))
@@ -197,7 +230,11 @@ class AllowlistTests(unittest.TestCase):
         self.assertFalse(allowlist.status()["loaded"])
         path.write_text(json.dumps({"allow_hosts": ["audio.internal"]}), encoding="utf-8")
         self.assertEqual(validate_audio_url("http://audio.internal/a.wav", allowlist.rules()), "http://audio.internal/a.wav")
+        valid_mtime_ns = path.stat().st_mtime_ns
         path.write_text("{invalid", encoding="utf-8")
+        # Some Windows filesystems can report the same mtime for two immediate writes.
+        # Force a distinct timestamp so this test deterministically exercises hot reload.
+        os.utime(path, ns=(valid_mtime_ns + 1_000_000_000, valid_mtime_ns + 1_000_000_000))
         self.assertFalse(allowlist.status()["loaded"])
         with self.assertRaises(V1ApiError):
             validate_audio_url("http://audio.internal/a.wav", allowlist.rules())

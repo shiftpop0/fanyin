@@ -14,6 +14,7 @@ from starlette.datastructures import UploadFile
 
 from core.audio_input import (
     HotReloadAllowlist,
+    cleanup_request_uploads,
     download_wav_url,
     ensure_standard_wav,
     normalize_uploaded_audio_path,
@@ -88,6 +89,7 @@ class PlatformApi:
         return {
             "platform_api_port": int(self.config.get("platform_api_port", 8885)),
             "api_key_required": bool(configured_api_key(self.config)),
+            "max_upload_mb": int(self.config.get("v1_max_upload_mb", 512)),
             "audio_url_allowlist": self.allowlist.status(),
             "inference_queue": self.queue.status(),
         }
@@ -97,6 +99,7 @@ class PlatformApi:
         async def audio_to_text(request: Request) -> JSONResponse:
             request_id = str(uuid.uuid4())
             original_name = ""
+            request_dir: Path | None = None
             try:
                 limit_bytes = int(self.config.get("v1_max_upload_mb", 512)) * 1024 * 1024
                 content_length = request.headers.get("content-length")
@@ -184,6 +187,16 @@ class PlatformApi:
                 if not isinstance(exc, V1ApiError):
                     logger.error("platform audio inference failed: %s\n%s", exc, traceback.format_exc())
                 return self._json_error(exc, request_id, original_name)
+            finally:
+                if request_dir is not None:
+                    try:
+                        await asyncio.to_thread(cleanup_request_uploads, request_dir, self.upload_root)
+                    except Exception as cleanup_exc:
+                        logger.warning(
+                            "failed to clean transient platform upload directory %s: %s",
+                            request_dir,
+                            cleanup_exc,
+                        )
 
         @self.router.get("/translator/csv/status")
         async def csv_status(request: Request) -> JSONResponse:

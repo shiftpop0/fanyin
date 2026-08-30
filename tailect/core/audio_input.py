@@ -162,6 +162,28 @@ def safe_upload_name(filename: str, request_id: str) -> str:
     return f"{(stem[:120] or 'audio')}{ext[:16]}"
 
 
+def cleanup_request_uploads(request_dir: Path, upload_root: Path) -> None:
+    """Remove one completed request's transient files inside the configured upload root.
+
+    The v1 route creates exactly one direct child directory per request.  Cleanup is
+    deliberately non-recursive: an unexpected nested directory aborts cleanup instead
+    of widening the deletion scope.
+    """
+    root = Path(upload_root).resolve()
+    target = Path(request_dir).resolve()
+    if target.parent != root:
+        raise ValueError(f"request upload directory is outside its direct root: {target}")
+    if not target.exists():
+        return
+    entries = list(target.iterdir())
+    nested = [entry for entry in entries if entry.is_dir() and not entry.is_symlink()]
+    if nested:
+        raise OSError(f"unexpected nested upload directory: {nested[0]}")
+    for entry in entries:
+        entry.unlink(missing_ok=True)
+    target.rmdir()
+
+
 def validate_upload_filename(filename: str) -> None:
     text = str(filename or "")
     if not text.strip():

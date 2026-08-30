@@ -14,12 +14,16 @@ MODEL_CONTAINER="${MODEL_CONTAINER:-tailect-v41-model}"
 PLATFORM_CONTAINER="${PLATFORM_CONTAINER:-tailect-v41-platform}"
 MODEL_DIR="${MODEL_DIR:-${PROJECT_ROOT}/model}"
 LOG_DIR="${LOG_DIR:-${PROJECT_ROOT}/log}"
+WEB_DIST_DIR="${WEB_DIST_DIR:-${PROJECT_ROOT}/web/dist}"
 ACTION="${1:-start}"
 REQUIRE_DIARIZATION="${REQUIRE_DIARIZATION:-1}"
 REQUIRE_FORCED_ALIGNER="${REQUIRE_FORCED_ALIGNER:-1}"
 
 container_exists() { docker ps -a --format '{{.Names}}' | grep -Fxq "$1"; }
 container_running() { docker ps --format '{{.Names}}' | grep -Fxq "$1"; }
+platform_web_mount() {
+    docker inspect --format '{{range .Mounts}}{{if eq .Destination "/usr/share/nginx/html"}}{{.Source}}{{end}}{{end}}' "$1" 2>/dev/null
+}
 port_in_use() {
     if command -v ss >/dev/null 2>&1; then
         ss -ltn "sport = :$1" 2>/dev/null | grep -q LISTEN
@@ -59,6 +63,11 @@ docker info >/dev/null 2>&1 || { echo "Docker daemon is unavailable." >&2; exit 
 docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "Offline model image not found: $IMAGE" >&2; exit 1; }
 docker image inspect "$NGINX_IMAGE" >/dev/null 2>&1 || { echo "Offline Nginx image not found: $NGINX_IMAGE" >&2; exit 1; }
 [[ -d "$MODEL_DIR/Tailect_V4.1" ]] || { echo "Model directory not found: $MODEL_DIR/Tailect_V4.1" >&2; exit 1; }
+[[ -f "$WEB_DIST_DIR/index.html" ]] || {
+    echo "Web build not found: $WEB_DIST_DIR/index.html" >&2
+    echo "Build it first: cd $PROJECT_ROOT/web && pnpm install --frozen-lockfile && pnpm build" >&2
+    exit 1
+}
 mkdir -p "$LOG_DIR" "$PROJECT_ROOT/outputs/api_uploads" "$PROJECT_ROOT/outputs/fanyin_output"
 
 if container_running "$MODEL_CONTAINER"; then
@@ -106,8 +115,22 @@ if [[ "$REQUIRE_FORCED_ALIGNER" == "1" ]] && [[ "$model_health" != *'"forced_ali
 fi
 
 if container_running "$PLATFORM_CONTAINER"; then
-    echo "Platform container already running: $PLATFORM_CONTAINER"
+    existing_web_mount="$(platform_web_mount "$PLATFORM_CONTAINER")"
+    if [[ -z "$existing_web_mount" ]]; then
+        echo "Existing platform container has no Web mount: $PLATFORM_CONTAINER" >&2
+        echo "Stop and rename that project container as a backup, then rerun this script." >&2
+        exit 1
+    fi
+    docker exec "$PLATFORM_CONTAINER" nginx -t >/dev/null
+    docker exec "$PLATFORM_CONTAINER" nginx -s reload >/dev/null
+    echo "Platform container reloaded: $PLATFORM_CONTAINER"
 elif container_exists "$PLATFORM_CONTAINER"; then
+    existing_web_mount="$(platform_web_mount "$PLATFORM_CONTAINER")"
+    if [[ -z "$existing_web_mount" ]]; then
+        echo "Existing platform container has no Web mount: $PLATFORM_CONTAINER" >&2
+        echo "Rename that stopped project container as a backup, then rerun this script." >&2
+        exit 1
+    fi
     port_in_use 8885 && { echo "Port 8885 is occupied; refusing to start." >&2; exit 1; }
     docker start "$PLATFORM_CONTAINER" >/dev/null
 else
@@ -115,6 +138,7 @@ else
     docker run -d --name "$PLATFORM_CONTAINER" --restart unless-stopped --network host \
         -v "${SCRIPT_DIR}/nginx_platform_8885.conf:/etc/nginx/conf.d/default.conf:ro" \
         -v "${SCRIPT_DIR}/proxy_params.conf:/etc/nginx/proxy_params.conf:ro" \
+        -v "${WEB_DIST_DIR}:/usr/share/nginx/html:ro" \
         -v "${LOG_DIR}:/var/log/nginx" "$NGINX_IMAGE" >/dev/null
 fi
 
@@ -134,4 +158,4 @@ if ! $platform_ready; then
     docker logs --tail 100 "$PLATFORM_CONTAINER" >&2 || true
     exit 1
 fi
-echo "Ready: generic API http://127.0.0.1:6006; platform API http://127.0.0.1:8885"
+echo "Ready: generic API http://127.0.0.1:6006; Web and platform API http://127.0.0.1:8885"
