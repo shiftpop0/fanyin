@@ -61,7 +61,8 @@ $startupBat = Get-ChildItem -LiteralPath $helperDir -File -Filter "*CSV*.bat" |
 if (-not $startupBat) {
     throw "The local helper startup BAT was not found."
 }
-Copy-Item -LiteralPath $startupBat.FullName -Destination $payloadHelperDir
+Copy-Item -LiteralPath $startupBat.FullName `
+    -Destination (Join-Path $payloadHelperDir "start_local_csv_helper.bat")
 $helperDocumentation = Join-Path $translatorDir "..\wxz\docs\本机CSV助手说明.md"
 if (-not (Test-Path -LiteralPath $helperDocumentation)) {
     throw "Local helper documentation was not found: $helperDocumentation"
@@ -94,7 +95,7 @@ Node SHA256: $nodeHash
 
 Usage:
 1. Copy the spyware-translator-v4.1 directory to the userscript computer.
-2. Double-click the CSV helper startup BAT in local_helper.
+2. Double-click local_helper\start_local_csv_helper.bat.
 3. Import spyware-translator-v4.1.user.js into Tampermonkey.
 4. No Node.js installation or network access is required.
 "@ | Set-Content -LiteralPath (Join-Path $packageDir "PACKAGE_INFO.txt") -Encoding UTF8

@@ -18,10 +18,16 @@ set FANYIN_OUTPUT_DIR=C:\fanyin_output
 
 ## 启动方式
 
-双击：
+源码目录双击：
 
 ```text
 启动本机CSV助手.bat
+```
+
+完整离线 ZIP 为避免压缩软件损坏中文文件名，使用等价的 ASCII 启动文件：
+
+```text
+start_local_csv_helper.bat
 ```
 
 正式离线包会附带：
