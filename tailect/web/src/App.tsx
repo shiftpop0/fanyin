@@ -48,7 +48,7 @@ function TranscriptionPage() {
   const [healthLoading, setHealthLoading] = useState(false)
   const [audioFile, setAudioFile] = useState<File | null>(null)
   const [fileList, setFileList] = useState<UploadFile[]>([])
-  const [diarize, setDiarize] = useState(false)
+  const [diarize, setDiarize] = useState(true)
   const [apiKey, setApiKey] = useState('')
   const [phase, setPhase] = useState<Phase>('idle')
   const [uploadPercent, setUploadPercent] = useState(0)
@@ -289,7 +289,9 @@ function TranscriptionPage() {
 
               <div className="option-grid">
                 <label className="switch-field">
-                  <Typography.Text strong>区分说话人</Typography.Text>
+                  <Typography.Text strong title="默认开启：直接使用 6006 原生分段文字和时间，避免整段 ForcedAligner E016。">
+                    区分说话人
+                  </Typography.Text>
                   <Switch
                     checked={diarize}
                     disabled={busy || health?.diarization_ready === false}
