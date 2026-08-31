@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Spyware 语音方言转普通话悬浮展示（Tailect V4.1）
 // @namespace    local.spyware-translator-v4.1
-// @version      0.5.4
+// @version      0.5.5
 // @description  捕获 spyware 页面语音切片，通过离线 8885 平台 API 调用 Tailect_V4.1，保存 CSV，并在列表/VX 页面展示和修正。
 // @match        http://spyware.zj.jz/*
 // @match        https://spyware.zj.jz/*
@@ -284,6 +284,10 @@
 .tm-modal-title{font-weight:700;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tm-modal-body{padding:12px;overflow:auto}
 .tm-modal audio{width:100%;margin-bottom:10px}
+.tm-modal-meta{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:7px;margin-bottom:8px}
+.tm-modal .tm-help{color:#64748b;font-size:12px}
+.tm-language-badge{flex:0 0 auto;border:1px solid #bfdbfe;border-radius:999px;background:#eff6ff;color:#1e40af;padding:2px 9px;font-size:12px;white-space:nowrap}
+.tm-language-badge strong{font-weight:700}
 .tm-modal-confirm{display:flex;flex-direction:column;gap:12px;max-width:620px}
 .tm-modal-confirm p{margin:0;color:#475569;white-space:pre-wrap}
 .tm-modal-confirm .tm-confirm-warning{border-left:4px solid #d97706;background:#fffbeb;color:#92400e;padding:9px 10px}
@@ -1859,10 +1863,14 @@
     modal.querySelector('.tm-modal-title').textContent = task.title || task.context.title || task.csvFilename;
     const body = modal.querySelector('.tm-modal-body');
     const segments = task.segments && task.segments.length ? task.segments : parseCsvSegments(task.localCsvText);
+    const detectedLanguage = taskDetectedLanguage(task);
     const isBusy = ['queued', 'downloading', 'merging', 'transcribing', 'saving'].includes(task.status);
     body.innerHTML = `
       ${task.audioBlobUrl ? `<audio controls src="${escAttr(task.audioBlobUrl)}"></audio>` : ''}
-      <div class="tm-help">CSV：${esc(task.csvFilename)}；切片：${esc(task.audioIndexRange || '')}；音频：${esc(task.audioChannelText || '等待本机处理')}</div>
+      <div class="tm-modal-meta">
+        <div class="tm-help">CSV：${esc(task.csvFilename)}；切片：${esc(task.audioIndexRange || '')}；音频：${esc(task.audioChannelText || '等待本机处理')}</div>
+        <div class="tm-language-badge" title="API language 字段的原始值，由模型自动检测，方言可能误判">模型检测标签：<strong>${esc(detectedLanguage || '未返回')}</strong>（仅供参考）</div>
+      </div>
       ${isBusy ? `<div class="tm-loading">${esc(task.message || STATUS_LABELS[task.status] || '处理中')}</div>` : ''}
       <div class="tm-actions" style="margin:8px 0">
         <button type="button" data-tm-action="retry" data-key="${escAttr(task.key)}">重新识别</button>
@@ -2003,6 +2011,17 @@
   function isChineseCsv(text) {
     const header = String(text || '').replace(/^\ufeff/, '').split(/\r?\n/, 1)[0] || '';
     return header.includes('分段序号') && header.includes('原始识别文本') && header.includes('开始时间（毫秒）');
+  }
+
+  function taskDetectedLanguage(task) {
+    const direct = String(task && task.language || '').trim();
+    if (direct) return direct;
+    const rows = parseCsv(task && task.localCsvText || '');
+    for (const row of rows) {
+      const fromCsv = String(row['识别语言'] || '').trim();
+      if (fromCsv) return fromCsv;
+    }
+    return '';
   }
 
   function isCurrentModelCsv(text) {

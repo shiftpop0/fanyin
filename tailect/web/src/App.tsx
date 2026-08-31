@@ -12,6 +12,7 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
   Upload,
   theme,
@@ -377,7 +378,13 @@ function TranscriptionPage() {
             }
           >
             <div className="result-meta">
-              <Typography.Text>语言：{result.language || '未知'}</Typography.Text>
+              <Tooltip title="API language 字段的原始值，由模型自动检测；相近方言可能误判，请勿作为人工定性的依据。">
+                <span>
+                  <Typography.Text type="secondary">模型检测标签：</Typography.Text>
+                  <Tag color="blue">{result.language || '未返回'}</Tag>
+                  <Typography.Text type="secondary">（仅供参考）</Typography.Text>
+                </span>
+              </Tooltip>
               <Typography.Text>文件：{result.file_name}</Typography.Text>
               <Typography.Text copyable={{ text: result.uuid }}>任务：{result.uuid}</Typography.Text>
             </div>
