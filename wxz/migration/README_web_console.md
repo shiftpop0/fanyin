@@ -11,10 +11,13 @@ Web 默认开启“区分说话人”，请求使用 `diarize=1`，直接复用 
 
 ```text
 fanyin-new4.1-web-console-20260831-r2.tar.gz
+大小：324406 字节
+SHA256：7bbbfc4837eba55baff21a8a96678ad3d9873d5bef0d59ea82683db21f8914a8
+SOURCE_COMMIT：dc22ab0322bbed64ecfd16525ab0b301bf511e5a
 ```
 
 `r2` 将 API `language` 字段明确标注为“模型检测标签（仅供参考）”，避免把相近
-方言的模型误判当成人工确认结果。归档文件大小、SHA-256 和源码提交以项目交接文档为准。
+方言的模型误判当成人工确认结果。
 
 ## 1. 校验并安装文件
 

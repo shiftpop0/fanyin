@@ -69,10 +69,10 @@ tailect/web/dist/assets/
 生产离线增量包：
 
 ```text
-fanyin-new4.1-web-console-20260831-r1.tar.gz
-大小：324134 字节
-SHA256：ffbb73748e626afe3a19e1265130f2eb5e104951aee4bbdf57d2751c1139f6f2
-SOURCE_COMMIT：2265ad534d2b389336236ea0f151f372d433d84d
+fanyin-new4.1-web-console-20260831-r2.tar.gz
+大小：324406 字节
+SHA256：7bbbfc4837eba55baff21a8a96678ad3d9873d5bef0d59ea82683db21f8914a8
+SOURCE_COMMIT：dc22ab0322bbed64ecfd16525ab0b301bf511e5a
 ```
 
 该包包含已构建的 `dist/`、Nginx 静态站点配置、平台容器启动脚本及可回退的
