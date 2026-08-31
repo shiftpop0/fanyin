@@ -63,11 +63,13 @@ if (-not $startupBat) {
 }
 Copy-Item -LiteralPath $startupBat.FullName `
     -Destination (Join-Path $payloadHelperDir "start_local_csv_helper.bat")
-$helperDocumentation = Join-Path $translatorDir "..\wxz\docs\本机CSV助手说明.md"
-if (-not (Test-Path -LiteralPath $helperDocumentation)) {
-    throw "Local helper documentation was not found: $helperDocumentation"
+$documentationDir = Join-Path $translatorDir "..\wxz\docs"
+$helperDocumentation = Get-ChildItem -LiteralPath $documentationDir -File -Filter "*CSV*.md" |
+    Select-Object -First 1
+if (-not $helperDocumentation) {
+    throw "Local helper documentation was not found under: $documentationDir"
 }
-Copy-Item -LiteralPath $helperDocumentation -Destination (Join-Path $payloadHelperDir "README.md")
+Copy-Item -LiteralPath $helperDocumentation.FullName -Destination (Join-Path $payloadHelperDir "README.md")
 Copy-Item -LiteralPath $NodeExe -Destination (Join-Path $runtimeDir "node.exe")
 
 $licenseCandidates = @(
