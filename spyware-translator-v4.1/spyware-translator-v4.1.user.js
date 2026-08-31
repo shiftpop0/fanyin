@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Spyware 语音方言转普通话悬浮展示（Tailect V4.1）
 // @namespace    local.spyware-translator-v4.1
-// @version      0.5.2
+// @version      0.5.3
 // @description  捕获 spyware 页面语音切片，通过离线 8885 平台 API 调用 Tailect_V4.1，保存 CSV，并在列表/VX 页面展示和修正。
 // @match        http://spyware.zj.jz/*
 // @match        https://spyware.zj.jz/*
@@ -2087,16 +2087,33 @@
       (fmt.audioFormat === 1 && [1, 2, 3, 4].includes(bytesPerSample)) ||
       (fmt.audioFormat === 3 && bytesPerSample === 4)
     );
-    if (!supported || fmt.blockAlign < bytesPerSample * fmt.channels) {
+    const frameBytes = bytesPerSample * fmt.channels;
+    if (!supported || !Number.isInteger(frameBytes) || frameBytes <= 0) {
       throw new Error(`不支持的 WAV 采样格式：format=${fmt.audioFormat}, bits=${fmt.bitsPerSample}, channels=${fmt.channels}`);
+    }
+    if (dataBuffer.byteLength % frameBytes !== 0) {
+      throw new Error(
+        `WAV PCM 数据长度不是完整采样帧：data=${dataBuffer.byteLength}, `
+        + `frame=${frameBytes}, format=${fmt.audioFormat}, bits=${fmt.bitsPerSample}, channels=${fmt.channels}`,
+      );
+    }
+    if (
+      fmt.blockAlign !== frameBytes
+      && typeof console !== 'undefined'
+      && (typeof settings === 'undefined' || settings.debug)
+    ) {
+      console.warn(
+        '[Tailect V4.1] WAV blockAlign 与 PCM 格式不一致，已按声道数和位深修正：',
+        { headerBlockAlign: fmt.blockAlign, frameBytes, bits: fmt.bitsPerSample, channels: fmt.channels },
+      );
     }
 
     const source = new DataView(dataBuffer);
-    const frameCount = Math.floor(dataBuffer.byteLength / fmt.blockAlign);
+    const frameCount = dataBuffer.byteLength / frameBytes;
     let peak = 0;
     for (let frame = 0; frame < frameCount; frame += 1) {
       let mixed = 0;
-      const frameOffset = frame * fmt.blockAlign;
+      const frameOffset = frame * frameBytes;
       for (let channel = 0; channel < fmt.channels; channel += 1) {
         mixed += readPcmSample(source, frameOffset + channel * bytesPerSample, fmt.audioFormat, fmt.bitsPerSample);
       }
@@ -2108,7 +2125,7 @@
     const target = new DataView(output);
     for (let frame = 0; frame < frameCount; frame += 1) {
       let mixed = 0;
-      const frameOffset = frame * fmt.blockAlign;
+      const frameOffset = frame * frameBytes;
       for (let channel = 0; channel < fmt.channels; channel += 1) {
         mixed += readPcmSample(source, frameOffset + channel * bytesPerSample, fmt.audioFormat, fmt.bitsPerSample);
       }

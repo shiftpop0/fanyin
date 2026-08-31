@@ -39,9 +39,26 @@ assert.deepEqual(readMonoPcm16(parsed.data), [10000, 6000, -8000, -4000]);
 assert.equal(merged.parts.length, 1);
 assert.equal(sandbox.wavApi.parseWav(merged.parts[0].buffer).channels, 1);
 
+const malformedHeaderStereo = makeStereoPcm16(
+  [
+    [10000, 0],
+    [0, 6000],
+    [-8000, 0],
+    [0, -4000],
+  ],
+  { blockAlign: 2, byteRate: 32000 },
+);
+const repaired = sandbox.wavApi.mergeWavBuffers([malformedHeaderStereo], 10);
+const repairedParsed = sandbox.wavApi.parseWav(repaired.fullBuffer);
+assert.equal(repaired.sourceChannels, 2);
+assert.equal(repaired.outputChannels, 1);
+assert.equal(repairedParsed.blockAlign, 2);
+assert.equal(repairedParsed.byteRate, 32000);
+assert.deepEqual(readMonoPcm16(repairedParsed.data), [10000, 6000, -8000, -4000]);
+
 console.log('Tailect V4.1 userscript audio downmix checks passed.');
 
-function makeStereoPcm16(frames) {
+function makeStereoPcm16(frames, { blockAlign = 4, byteRate = 64000 } = {}) {
   const dataSize = frames.length * 4;
   const out = new ArrayBuffer(44 + dataSize);
   const view = new DataView(out);
@@ -53,8 +70,8 @@ function makeStereoPcm16(frames) {
   view.setUint16(20, 1, true);
   view.setUint16(22, 2, true);
   view.setUint32(24, 16000, true);
-  view.setUint32(28, 64000, true);
-  view.setUint16(32, 4, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
   view.setUint16(34, 16, true);
   writeText(view, 36, 'data');
   view.setUint32(40, dataSize, true);
