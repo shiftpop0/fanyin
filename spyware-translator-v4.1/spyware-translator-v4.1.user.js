@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Spyware 语音方言转普通话悬浮展示（Tailect V4.1）
 // @namespace    local.spyware-translator-v4.1
-// @version      0.5.3
+// @version      0.5.4
 // @description  捕获 spyware 页面语音切片，通过离线 8885 平台 API 调用 Tailect_V4.1，保存 CSV，并在列表/VX 页面展示和修正。
 // @match        http://spyware.zj.jz/*
 // @match        https://spyware.zj.jz/*
@@ -17,7 +17,7 @@
   'use strict';
 
   const STORAGE_KEY = 'tailect_asr_translator_v41_settings';
-  const SETTINGS_SCHEMA_VERSION = 4;
+  const SETTINGS_SCHEMA_VERSION = 5;
   const PANEL_ID = 'tailect-v41-translator-panel';
   const MODAL_ID = 'tailect-v41-translator-modal';
   const TOAST_ID = 'tailect-v41-translator-toasts';
@@ -59,7 +59,7 @@
     apiKey: '',
     localHelperUrl: 'http://127.0.0.1:18885',
     localOutputDir: 'C:\\fanyin_output',
-    diarize: false,
+    diarize: true,
     autoTranscribe: true,
     maxMergeMinutes: 10,
     maxSliceCount: 0,
@@ -146,7 +146,7 @@
     const resetSavedDiarize = Number(saved.settingsSchemaVersion || 0) < SETTINGS_SCHEMA_VERSION;
     const merged = { ...DEFAULT_SETTINGS, ...saved, ...overrides };
     if (resetSavedDiarize && !Object.prototype.hasOwnProperty.call(overrides || {}, 'diarize')) {
-      merged.diarize = false;
+      merged.diarize = true;
     }
     merged.settingsSchemaVersion = SETTINGS_SCHEMA_VERSION;
     delete merged.speakerCount;
@@ -425,7 +425,13 @@
     } else if (action === 'toggle-diarize') {
       settings.diarize = !settings.diarize;
       saveSettings();
-      showToast(`说话人识别已${settings.diarize ? '开启' : '关闭'}${settings.diarize ? '，识别耗时可能增加' : ''}`, settings.diarize ? 'success' : '');
+      showToast(
+        settings.diarize
+          ? '说话人识别已开启；将复用 6006 原生分段文字和时间。'
+          : '说话人识别已关闭；将使用整段 ForcedAligner，方言或长文本可能触发 E016。',
+        settings.diarize ? 'success' : 'warning',
+        settings.diarize ? 4200 : 7000,
+      );
       renderPanel();
     } else if (action === 'save-settings') {
       readSettingsFromPanel();
@@ -949,7 +955,13 @@
       const part = merged.parts[i];
       updateTask(task, 'transcribing', `模型识别 ${i + 1}/${merged.parts.length}`);
       const result = await callV1Api(part.buffer, `${stripCsvExt(task.csvFilename)}_part${i + 1}.wav`);
-      if (result.code !== 200) throw new Error(result.message || `模型返回 code=${result.code}`);
+      if (result.code !== 200) {
+        let message = result.message || `模型返回 code=${result.code}`;
+        if (!settings.diarize && String(message).includes('[E016]')) {
+          message += '\n当前“说话人识别”处于关闭状态；请开启后重新识别，以使用 6006 原生分段时间。';
+        }
+        throw new Error(message);
+      }
       language = result.language || language;
       uuidText = result.uuid || uuidText;
       (result.data || []).forEach((row) => {
@@ -1374,7 +1386,7 @@
           <div class="tm-section-head">识别控制</div>
           <div class="tm-switches">
             <button class="tm-toggle ${settings.autoTranscribe ? 'is-on' : 'is-off'}" type="button" data-action="toggle-auto">自动识别新音频：${settings.autoTranscribe ? '已开启' : '已关闭'}</button>
-            <button class="tm-toggle ${settings.diarize ? 'is-on' : 'is-off'}" type="button" data-action="toggle-diarize">说话人识别：${settings.diarize ? '已开启' : '已关闭'}</button>
+            <button class="tm-toggle ${settings.diarize ? 'is-on' : 'is-off'}" type="button" data-action="toggle-diarize" title="默认开启：复用 6006 原生说话人片段。关闭后整段 ForcedAligner 在方言或长文本上可能触发 E016。">说话人识别：${settings.diarize ? '已开启' : '已关闭'}</button>
             <button type="button" data-action="manual-current">全部重新识别</button>
             <button type="button" data-action="save-as-csv" data-key="${escAttr(active ? active.key : '')}" ${canSaveTaskCsv(active) ? '' : 'disabled'} title="${canSaveTaskCsv(active) ? '选择位置保存当前中文 CSV；助手不可用时也可使用' : '当前任务还没有可用于另存的 CSV'}">CSV另存</button>
             <button type="button" data-action="open-path" data-key="${escAttr(active ? active.key : '')}" ${active && active.hasLocalCsv ? '' : 'disabled'} title="${active && active.hasLocalCsv ? '在资源管理器中选中当前本机 CSV' : '本机助手尚未确认该 CSV 已落盘'}">打开文件路径</button>

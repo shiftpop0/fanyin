@@ -2,7 +2,7 @@
 
 本包面向当前运行 R8 或早期 R9 的 Ubuntu release。它解决三个问题：
 
-1. 撤销错误 R8 在服务端加入的双声道合并；声道合并由 Windows 最新油猴脚本 `0.5.3` 完成，服务端不主动改写已是 WAV 的声道。
+1. 撤销错误 R8 在服务端加入的双声道合并；声道合并由 Windows 最新油猴脚本 `0.5.4` 完成，服务端不主动改写已是 WAV 的声道。
 2. 让 `8885/v1/audiototext?diarize=1` 与 `6006/asr?diarization=true` 复用同一套“说话人分段 → 短片段批量 ASR”核心，同时保持各自的响应 JSON。
 3. `diarize=1` 直接把 6006 原生 `speaker_segments` 转成平台字幕行，不再对拼接全文执行第二次 ForcedAligner，修复生产样本的 `[E016] local ForcedAligner did not cover the full transcript`。
 
@@ -93,8 +93,9 @@ bash migration/acceptance_r9_api_parity.sh
 ## 6. 油猴脚本
 
 归档的 `20260831-r9` payload 曾附带油猴 `0.5.2`；Windows 客户端不得继续安装该副本，
-必须另行覆盖为 `0.5.3`。新版兼容双声道 PCM16 WAV 把 `blockAlign` 错写成 `2` 的
-业务文件，并在浏览器本机合并为单声道后上传。服务端不得出现 R8 的
+必须另行覆盖为 `0.5.4`。新版兼容双声道 PCM16 WAV 把 `blockAlign` 错写成 `2` 的
+业务文件，在浏览器本机合并为单声道后上传，并默认使用 `diarize=1` 避免全局
+ForcedAligner 的 `E016`。服务端不得出现 R8 的
 `[AUDIO] merged ... channels to mono` 日志。
 
 ## 7. 回滚
