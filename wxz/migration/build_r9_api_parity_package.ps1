@@ -1,5 +1,5 @@
 param(
-    [string]$PackageDate = "20260830-r9"
+    [string]$PackageDate = "20260831-r9"
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,11 +35,15 @@ function Copy-RepoFile {
 
 $PayloadFiles = @(
     "tailect/core/audio_input.py",
+    "tailect/core/config.py",
     "tailect/core/inference_engine.py",
     "tailect/core/v1_adapter.py",
     "tailect/core/v1_contract.py",
+    "tailect/core/v1_router.py",
+    "tailect/tests/test_v1_platform.py",
     "tailect/README.md",
     "spyware-translator-v4.1/spyware-translator-v4.1.user.js",
+    "spyware-translator-v4.1/tests/tailect_v41_probe.mjs",
     "spyware-translator-v4.1/tests/userscript_static_test.mjs"
 )
 $PayloadFiles | ForEach-Object { Copy-RepoFile -RelativePath $_ -DestinationRoot $PayloadRoot }
@@ -78,6 +82,9 @@ if ($InferenceText -notmatch 'def transcribe_diarized_segments\(') {
 $AdapterText = [System.IO.File]::ReadAllText((Join-Path $PayloadRoot "tailect\core\v1_adapter.py"))
 if ($AdapterText -notmatch 'service\.transcribe_diarized_segments\(') {
     throw "R9 v1 adapter is not connected to the shared core"
+}
+if ($AdapterText -notmatch 'build_diarized_caption_rows\(') {
+    throw "R9 v1 adapter does not use native speaker-segment timestamps"
 }
 
 $ResolvedCommit = (git -C $RepositoryRoot rev-parse HEAD).Trim()

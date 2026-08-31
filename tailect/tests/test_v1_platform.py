@@ -24,6 +24,8 @@ from core.v1_adapter import FifoInferenceQueue, transcribe_platform_audio
 from core.v1_contract import (
     V1ApiError,
     build_caption_rows,
+    build_diarized_caption_rows,
+    forced_aligner_language,
     reject_removed_v1_parameters,
     require_model_alias,
 )
@@ -98,7 +100,40 @@ class ContractTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.error_id, "E016")
 
-    def test_adapter_reuses_native_diarized_asr_before_alignment(self) -> None:
+    def test_diarized_rows_preserve_native_text_and_timestamps(self) -> None:
+        rows = build_diarized_caption_rows(
+            full_text="第一句。 第二句。",
+            speaker_segments=[
+                {"start": 0.1, "end": 0.8, "speaker": "speaker-a", "text": "第一句。 "},
+                {"start": 0.9, "end": 1.6, "speaker": "speaker-b", "text": "第二句。"},
+            ],
+        )
+        self.assertEqual(
+            rows,
+            [
+                {"lid": "1", "text": "第一句。 ", "begin": 100, "end": 800},
+                {"lid": "2", "text": "第二句。", "begin": 900, "end": 1600},
+            ],
+        )
+        self.assertEqual("".join(row["text"] for row in rows).strip(), "第一句。 第二句。")
+
+    def test_diarized_rows_reject_text_mismatch(self) -> None:
+        with self.assertRaisesRegex(V1ApiError, "did not preserve the full transcript") as raised:
+            build_diarized_caption_rows(
+                full_text="你好世界",
+                speaker_segments=[
+                    {"start": 0.0, "end": 0.5, "speaker": "speaker-a", "text": "你好"},
+                ],
+            )
+        self.assertEqual(raised.exception.error_id, "E016")
+
+    def test_forced_aligner_language_maps_dialect_to_supported_fallback(self) -> None:
+        self.assertEqual(forced_aligner_language("Tiantai", "Chinese"), "Chinese")
+        self.assertEqual(forced_aligner_language("Wu language", "Chinese"), "Chinese")
+        self.assertEqual(forced_aligner_language("en", "Chinese"), "English")
+        self.assertEqual(forced_aligner_language("Cantonese", "Chinese"), "Cantonese")
+
+    def test_adapter_reuses_native_diarized_rows_without_global_alignment(self) -> None:
         calls = []
 
         class FakeService:
@@ -116,36 +151,29 @@ class ContractTests(unittest.TestCase):
                         {"start": 0.0, "end": 0.55, "speaker": "speaker-a", "text": "你好。"},
                         {"start": 0.55, "end": 1.2, "speaker": "speaker-b", "text": "世界。"},
                     ],
-                    "detected_languages": ["Chinese", "Chinese"],
+                    "detected_languages": ["Tiantai", "Tiantai"],
                 }
 
             def forced_align(self, _path: str, text: str, language: str):
-                calls.append(("align", text, language))
-                return {
-                    "segments": [
-                        {"start": 0.2, "end": 0.5, "text": "你好"},
-                        {"start": 0.6, "end": 0.9, "text": "世界"},
-                    ]
-                }
+                raise AssertionError(f"global alignment must not run: {text=} {language=}")
 
         result = transcribe_platform_audio(
             FakeService(), "sample.wav", diarize=True,
             split_by_punctuation=True,
             config={"v1_alignment_fallback_language": "Chinese", "v1_diarization_fallback": False},
         )
-        self.assertEqual(result["language"], "zh")
+        self.assertEqual(result["language"], "tiantai")
         self.assertEqual(
             result["rows"],
             [
-                {"lid": "1", "text": "你好。", "begin": 200, "end": 500},
-                {"lid": "2", "text": "世界。", "begin": 600, "end": 900},
+                {"lid": "1", "text": "你好。", "begin": 0, "end": 550},
+                {"lid": "2", "text": "世界。", "begin": 550, "end": 1200},
             ],
         )
         self.assertEqual(
             calls,
             [
                 ("native-diarized-asr", "sample.wav", False),
-                ("align", "你好。世界。", "Chinese"),
             ],
         )
 
@@ -168,6 +196,25 @@ class ContractTests(unittest.TestCase):
         )
         self.assertEqual(result["rows"], [{"lid": "1", "text": "你好。", "begin": 200, "end": 900}])
         self.assertEqual(calls, ["asr", ("align", "你好。", "Chinese")])
+
+    def test_non_diarized_dialect_response_uses_chinese_for_alignment(self) -> None:
+        calls = []
+
+        class FakeService:
+            def asr_raw(self, _path: str):
+                return {"text": "方言文本。", "language": "Tiantai"}
+
+            def forced_align(self, _path: str, text: str, language: str):
+                calls.append((text, language))
+                return {"segments": [{"start": 0.1, "end": 0.8, "text": "方言文本"}]}
+
+        result = transcribe_platform_audio(
+            FakeService(), "sample.wav", diarize=False,
+            split_by_punctuation=True,
+            config={"v1_alignment_fallback_language": "Chinese", "v1_diarization_fallback": False},
+        )
+        self.assertEqual(result["language"], "tiantai")
+        self.assertEqual(calls, [("方言文本。", "Chinese")])
 
     def test_diarization_failure_is_not_hidden_when_fallback_is_disabled(self) -> None:
         class FakeService:

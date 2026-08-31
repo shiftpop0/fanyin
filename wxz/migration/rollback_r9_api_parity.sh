@@ -24,11 +24,15 @@ esac
 
 files=(
     "tailect/core/audio_input.py"
+    "tailect/core/config.py"
     "tailect/core/inference_engine.py"
     "tailect/core/v1_adapter.py"
     "tailect/core/v1_contract.py"
+    "tailect/core/v1_router.py"
+    "tailect/tests/test_v1_platform.py"
     "tailect/README.md"
     "spyware-translator-v4.1/spyware-translator-v4.1.user.js"
+    "spyware-translator-v4.1/tests/tailect_v41_probe.mjs"
     "spyware-translator-v4.1/tests/userscript_static_test.mjs"
 )
 

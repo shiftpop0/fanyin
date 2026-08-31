@@ -146,9 +146,9 @@ curl -X POST \
 | --- | --- | --- |
 | `model` | 无 | 必填且只能为 `Tailect_V4.1`；也兼容写法 `v4.1` |
 | `file` | 无 | multipart 音频文件，或 form/query 中的完整 WAV URL |
-| `diarize` | `0` | `1` 时复用 6006 原生的 TargetDiarization 分段批量 ASR，再按说话人边界生成 `lid`；`0` 保持整段 ASR |
+| `diarize` | `0` | `1` 时直接把 6006 原生 TargetDiarization 分段的文字、说话人和起止时间转换为 `lid/begin/end`；`0` 保持整段 ASR |
 | `language` | — | 仅为旧客户端兼容而接收，服务端忽略其值，不参与识别或对齐 |
-| `split_by_punctuation` | `1` | 按中英文标点切字幕行 |
+| `split_by_punctuation` | `1` | 仅 `diarize=0` 时按中英文标点切字幕行；说话人模式以原生片段为行 |
 
 旧版扩展的 `max_chars` 已移除；若旧客户端仍发送该参数，接口返回业务错误 `E017`。
 `split_by_punctuation` 属于 8885 响应字幕整形能力，并非原生 6006 `/asr` 参数。
@@ -184,10 +184,11 @@ HTTP 状态始终为 200；业务状态看 body 的 `code`：
 }
 ```
 
-时间戳来自项目本地 `Qwen3-ForcedAligner-0.6B`。对齐失败、没有时间戳、时间戳
-无效，或对齐结果不能覆盖完整识别文本时返回 `E016`，不返回缺尾的部分成功结果，
-不生成全零时间戳，也不联网寻找替代模型。`diarize=1` 时说话人变化是字幕硬边界，
-标点仅在同一说话人内部继续分行。
+`diarize=0` 的时间戳来自本地 `Qwen3-ForcedAligner-0.6B`；ASR 返回方言标签时，
+内部对齐语言会规范为 ForcedAligner 支持的标准语言，响应仍保留模型检测标签。
+`diarize=1` 的时间戳直接继承 6006 原生 `speaker_segments.start/end`，不再把拼接全文
+做一次全局对齐。两种模式都会严格校验全文与时间戳；失败返回 `E016`，不返回缺尾
+结果、不生成全零时间戳，也不联网寻找替代模型。
 
 ### 4.4 失败响应
 
@@ -213,7 +214,7 @@ HTTP 状态始终为 200；业务状态看 body 的 `code`：
 | `E009` / `E010` | 模型服务未就绪 / 缺少 file |
 | `E011` / `E012` | FIFO 队列已满 / 等待超时 |
 | `E013`–`E015` | URL 非法、下载失败、响应不是 WAV |
-| `E016` | 本地 ForcedAligner 未返回时间戳 |
+| `E016` | ForcedAligner 或原生说话人片段未完整、有效地覆盖识别全文 |
 | `E017` | 请求包含已移除的 `max_chars` 参数 |
 | `E020`–`E022` | CSV 不存在、JSON 非法、修正行不存在 |
 

@@ -31,6 +31,11 @@ grep -Fq 'service.transcribe_diarized_segments(' \
     echo "R9 v1 adapter is not connected to the shared core." >&2
     exit 1
 }
+grep -Fq 'build_diarized_caption_rows(' \
+    "$RELEASE_ROOT/tailect/core/v1_adapter.py" || {
+    echo "R9 E016 fix is missing: diarized requests still use global alignment." >&2
+    exit 1
+}
 
 mkdir -p "$RESULT_ROOT"
 curl -fsS "${SERVER_BASE}:6006/health" | tee "$RESULT_ROOT/health_6006.json"
@@ -44,25 +49,37 @@ curl -fsS --max-time 1200 -X POST \
     -o "$RESULT_ROOT/result_6006.json"
 
 curl -fsS --max-time 1200 -X POST \
-    "${SERVER_BASE}:8885/v1/audiototext?model=Tailect_V4.1&diarize=1" \
+    "${SERVER_BASE}:8885/v1/audiototext?model=Tailect_V4.1&diarize=1&language=compatibility-probe-ignored" \
     -F "file=@${TEST_AUDIO_FILE};type=audio/wav" \
     -o "$RESULT_ROOT/result_8885.json"
 
-python3 - "$RESULT_ROOT/result_6006.json" "$RESULT_ROOT/result_8885.json" "$REQUIRE_MULTIPLE_LIDS" <<'PY'
+curl -sS --max-time 30 -X POST \
+    "${SERVER_BASE}:8885/v1/audiototext?model=Tailect_V4.1&max_chars=40" \
+    -o "$RESULT_ROOT/result_removed_max_chars.json"
+
+python3 - \
+    "$RESULT_ROOT/result_6006.json" \
+    "$RESULT_ROOT/result_8885.json" \
+    "$RESULT_ROOT/result_removed_max_chars.json" \
+    "$REQUIRE_MULTIPLE_LIDS" <<'PY'
 import json
 import pathlib
 import sys
 
 native_path = pathlib.Path(sys.argv[1])
 platform_path = pathlib.Path(sys.argv[2])
-require_multiple = sys.argv[3] == "1"
+removed_parameter_path = pathlib.Path(sys.argv[3])
+require_multiple = sys.argv[4] == "1"
 native = json.loads(native_path.read_text(encoding="utf-8-sig"))
 platform = json.loads(platform_path.read_text(encoding="utf-8-sig"))
+removed_parameter = json.loads(removed_parameter_path.read_text(encoding="utf-8-sig"))
 
 if native.get("diarization_status") != "ok":
     raise SystemExit(f"6006 diarization is not ok: {native.get('diarization_status')}")
 if platform.get("code") != 200:
     raise SystemExit(f"8885 business failure: {platform.get('message')}")
+if removed_parameter.get("code") != 500 or "[E017]" not in str(removed_parameter.get("message") or ""):
+    raise SystemExit(f"8885 did not explicitly reject removed max_chars: {removed_parameter}")
 
 native_text = str(native.get("overall_text") or "").strip()
 rows = platform.get("data") or []
@@ -73,6 +90,31 @@ if native_text != platform_text:
     raise SystemExit(
         "R9 parity failure: 8885 text is not identical to native 6006 text\n"
         f"6006={native_text}\n8885={platform_text}"
+    )
+
+speaker_ids = {}
+expected_rows = []
+for segment in native.get("speaker_segments") or []:
+    text = str(segment.get("text") or "")
+    if not text.strip():
+        continue
+    speaker = str(segment.get("speaker") or "")
+    if speaker not in speaker_ids:
+        speaker_ids[speaker] = str(len(speaker_ids) + 1)
+    expected_rows.append(
+        {
+            "lid": speaker_ids[speaker],
+            "text": text,
+            "begin": int(round(float(segment["start"]) * 1000)),
+            "end": int(round(float(segment["end"]) * 1000)),
+        }
+    )
+
+if rows != expected_rows:
+    raise SystemExit(
+        "R9 native-segment failure: 8885 rows are not the exact 6006 "
+        "speaker_segments conversion\n"
+        f"expected={expected_rows}\nactual={rows}"
     )
 
 previous_begin = -1
@@ -98,7 +140,8 @@ native_speakers = int(native.get("speaker_count") or 0)
 print(
     "R9 API parity passed: "
     f"chars={len(native_text)} rows={len(rows)} "
-    f"native_speakers={native_speakers} lids={sorted(lids)}"
+    f"native_speakers={native_speakers} lids={sorted(lids)} "
+    "language_ignored=yes max_chars_rejected=E017"
 )
 PY
 

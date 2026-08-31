@@ -58,7 +58,7 @@
 | **说话人分离 + 批量 ASR** | `POST /asr?diarization=true` | 先分离说话人，再对每段进行 **批量推理**（`transcribe_batch`） |
 | **强制对齐 (Forced Alignment)** | `POST /forced_align` | 将文本与音频对齐，输出字/词级时间戳 |
 | **标点恢复 (Punctuation)** | `POST /punctuation` | 为 ASR 结果恢复标点符号 |
-| **平台标准转写** | `POST /v1/audiototext` | `Tailect_V4.1` 固定合同、ForcedAligner 时间戳、可选说话人、FIFO 并发 1 |
+| **平台标准转写** | `POST /v1/audiototext` | `Tailect_V4.1` 固定合同、原生说话人片段或 ForcedAligner 时间戳、FIFO 并发 1 |
 | **油猴 CSV 同步** | `GET/POST /translator/*` | CSV 读取、状态、保存与人工修正 |
 | **健康检查** | `GET /health` | 服务状态监测 |
 
@@ -66,7 +66,7 @@
 
 > **R9 处理链路：** `8885/v1/audiototext?diarize=1` 与
 > `6006/asr?diarization=true` 复用同一个“TargetDiarization → 说话人片段裁剪 →
-> 批量 ASR”核心。6006 保持原生 JSON，8885 再执行 ForcedAligner 和平台字幕适配，
+> 批量 ASR”核心。6006 保持原生 JSON，8885 直接把原生说话人片段时间转换为平台字幕，
 > 保持 `code/language/data/file_name/message/uuid` 合同。两个端口进入同一个 FastAPI
 > 进程，但 URL 不同，因此仍由不同路由负责外层协议。
 

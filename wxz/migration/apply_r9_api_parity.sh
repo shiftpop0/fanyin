@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Apply R9 native-6006 ASR parity to the existing new4.1 release.
+# Apply the latest R9 native-6006 parity fix to an R8 or earlier R9 release.
 # Files are backed up first; containers are not stopped, restarted, or removed.
 
 set -euo pipefail
@@ -13,11 +13,15 @@ LATEST_POINTER="${RELEASE_ROOT}/wxz/hotfix_backups/r9_api_parity_latest.txt"
 
 files=(
     "tailect/core/audio_input.py"
+    "tailect/core/config.py"
     "tailect/core/inference_engine.py"
     "tailect/core/v1_adapter.py"
     "tailect/core/v1_contract.py"
+    "tailect/core/v1_router.py"
+    "tailect/tests/test_v1_platform.py"
     "tailect/README.md"
     "spyware-translator-v4.1/spyware-translator-v4.1.user.js"
+    "spyware-translator-v4.1/tests/tailect_v41_probe.mjs"
     "spyware-translator-v4.1/tests/userscript_static_test.mjs"
 )
 
@@ -50,12 +54,15 @@ grep -Fq 'service.transcribe_diarized_segments(' \
     echo "R9 v1 adapter does not call the shared diarized ASR core." >&2
     exit 1
 }
+grep -Fq 'build_diarized_caption_rows(' \
+    "$PAYLOAD_ROOT/tailect/core/v1_adapter.py" || {
+    echo "R9 v1 adapter does not use native speaker-segment timestamps." >&2
+    exit 1
+}
 
-if grep -Fq 'def transcribe_diarized_segments(' \
-    "$RELEASE_ROOT/tailect/core/inference_engine.py" && \
-    grep -Fq 'service.transcribe_diarized_segments(' \
+if grep -Fq 'build_diarized_caption_rows(' \
     "$RELEASE_ROOT/tailect/core/v1_adapter.py"; then
-    echo "Release already appears to contain R9; refusing a duplicate apply." >&2
+    echo "Release already appears to contain the latest R9 E016 fix; refusing a duplicate apply." >&2
     echo "A duplicate backup would make the default rollback point ambiguous." >&2
     exit 1
 fi
@@ -69,9 +76,12 @@ import sys
 root = pathlib.Path(sys.argv[1])
 for relative in (
     "tailect/core/audio_input.py",
+    "tailect/core/config.py",
     "tailect/core/inference_engine.py",
     "tailect/core/v1_adapter.py",
     "tailect/core/v1_contract.py",
+    "tailect/core/v1_router.py",
+    "tailect/tests/test_v1_platform.py",
 ):
     path = root / relative
     ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -106,9 +116,12 @@ import sys
 root = pathlib.Path(sys.argv[1])
 for relative in (
     "tailect/core/audio_input.py",
+    "tailect/core/config.py",
     "tailect/core/inference_engine.py",
     "tailect/core/v1_adapter.py",
     "tailect/core/v1_contract.py",
+    "tailect/core/v1_router.py",
+    "tailect/tests/test_v1_platform.py",
 ):
     path = root / relative
     ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -116,6 +129,6 @@ print("R9 Python syntax check passed.")
 PY
 fi
 
-printf 'R9 files applied. Previous files retained under: %s\n' "$BACKUP_ROOT"
+printf 'Latest R9 files applied. Previous files retained under: %s\n' "$BACKUP_ROOT"
 printf 'Backup pointer: %s\n' "$LATEST_POINTER"
 printf 'No container was stopped or restarted. Restart this project to load R9.\n'

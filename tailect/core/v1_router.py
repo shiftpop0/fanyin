@@ -173,7 +173,15 @@ class PlatformApi:
                     status_code=200,
                 )
             except Exception as exc:
-                if not isinstance(exc, V1ApiError):
+                if isinstance(exc, V1ApiError):
+                    logger.warning(
+                        "platform request failed: request_id=%s file_name=%s error_id=%s message=%s",
+                        request_id,
+                        original_name,
+                        exc.error_id,
+                        exc,
+                    )
+                else:
                     logger.error("platform audio inference failed: %s\n%s", exc, traceback.format_exc())
                 return self._json_error(exc, request_id, original_name)
             finally:

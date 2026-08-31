@@ -8,7 +8,13 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, Mapping
 
 from core.logger import logger
-from core.v1_contract import V1ApiError, build_caption_rows, language_to_v1
+from core.v1_contract import (
+    V1ApiError,
+    build_caption_rows,
+    build_diarized_caption_rows,
+    forced_aligner_language,
+    language_to_v1,
+)
 
 
 class FifoInferenceQueue:
@@ -93,29 +99,43 @@ def transcribe_platform_audio(
             "rows": [],
         }
 
-    align_language = detected_language or str(
-        config.get("v1_alignment_fallback_language") or "Chinese"
-    )
-    aligned = service.forced_align(audio_path, text=text, language=align_language)
-    timestamps = aligned.get("segments") or []
-
-    rows = build_caption_rows(
-        full_text=text,
-        timestamps=timestamps,
-        speaker_segments=speakers,
-        split_by_punctuation=split_by_punctuation,
-    )
+    fallback_language = str(config.get("v1_alignment_fallback_language") or "Chinese")
+    align_language = forced_aligner_language(detected_language, fallback_language)
+    if diarize:
+        rows = build_diarized_caption_rows(
+            full_text=text,
+            speaker_segments=speakers,
+        )
+        timestamps = []
+        timestamp_source = "native_speaker_segments"
+    else:
+        logger.info(
+            "[V1-ALIGN] detected_language=%s align_language=%s text_len=%s",
+            detected_language or "unknown",
+            align_language,
+            len(text),
+        )
+        aligned = service.forced_align(audio_path, text=text, language=align_language)
+        timestamps = aligned.get("segments") or []
+        rows = build_caption_rows(
+            full_text=text,
+            timestamps=timestamps,
+            split_by_punctuation=split_by_punctuation,
+        )
+        timestamp_source = "forced_aligner"
     logger.info(
-        "[V1-ASR] pipeline=%s text_len=%s speaker_segments=%s aligned_segments=%s rows=%s language=%s",
+        "[V1-ASR] pipeline=%s timestamp_source=%s text_len=%s speaker_segments=%s "
+        "aligned_segments=%s rows=%s language=%s",
         pipeline,
+        timestamp_source,
         len(text),
         len(speakers),
         len(timestamps),
         len(rows),
-        detected_language or align_language,
+        detected_language or "unknown",
     )
     return {
-        "language": language_to_v1(detected_language or align_language),
+        "language": language_to_v1(detected_language),
         "text": text,
         "rows": rows,
     }

@@ -16,6 +16,32 @@ LANGUAGE_TO_V1 = {
     "korean": "ko",
 }
 
+FORCED_ALIGNER_LANGUAGES = {
+    "chinese": "Chinese",
+    "zh": "Chinese",
+    "mandarin": "Chinese",
+    "cantonese": "Cantonese",
+    "yue": "Cantonese",
+    "english": "English",
+    "en": "English",
+    "german": "German",
+    "de": "German",
+    "spanish": "Spanish",
+    "es": "Spanish",
+    "french": "French",
+    "fr": "French",
+    "italian": "Italian",
+    "it": "Italian",
+    "portuguese": "Portuguese",
+    "pt": "Portuguese",
+    "russian": "Russian",
+    "ru": "Russian",
+    "korean": "Korean",
+    "ko": "Korean",
+    "japanese": "Japanese",
+    "ja": "Japanese",
+}
+
 
 class V1ApiError(Exception):
     """Business error returned inside the stable HTTP-200 v1 envelope."""
@@ -104,6 +130,15 @@ def language_to_v1(value: Any) -> str:
     return LANGUAGE_TO_V1.get(first.lower(), first.lower())
 
 
+def forced_aligner_language(value: Any, fallback: Any = "Chinese") -> str:
+    """Map ASR language/dialect labels to a language supported by the local aligner."""
+    detected = str(value or "").strip().lower()
+    if detected in FORCED_ALIGNER_LANGUAGES:
+        return FORCED_ALIGNER_LANGUAGES[detected]
+    configured_fallback = str(fallback or "Chinese").strip().lower()
+    return FORCED_ALIGNER_LANGUAGES.get(configured_fallback, "Chinese")
+
+
 def _pure_text_len(text: str) -> int:
     return sum(
         1
@@ -149,6 +184,66 @@ def normalize_speaker_segments(items: Any) -> List[Tuple[float, float, str]]:
             labels[raw] = str(len(labels) + 1)
         output.append((start, end, labels[raw]))
     return output
+
+
+def build_diarized_caption_rows(
+    *,
+    full_text: str,
+    speaker_segments: Any,
+) -> List[Dict[str, Any]]:
+    """Adapt native diarized ASR segments without globally realigning their text."""
+    text = str(full_text or "").strip()
+    if not text:
+        return []
+    if not isinstance(speaker_segments, list) or not speaker_segments:
+        raise V1ApiError("native diarized ASR returned no speaker segments", "E016")
+
+    labels: Dict[str, str] = {}
+    rows: List[Dict[str, Any]] = []
+    preserved_parts: List[str] = []
+    previous_start = -1.0
+    for item in speaker_segments:
+        if not isinstance(item, dict):
+            raise V1ApiError("native diarized ASR returned an invalid speaker segment", "E016")
+        segment_text = str(item.get("text") or "")
+        if not segment_text.strip():
+            continue
+        try:
+            start_sec = float(item.get("start", 0.0))
+            end_sec = float(item.get("end", 0.0))
+        except (TypeError, ValueError) as exc:
+            raise V1ApiError("native diarized ASR returned a non-numeric timestamp", "E016") from exc
+        if start_sec < 0 or end_sec <= start_sec or start_sec < previous_start:
+            raise V1ApiError("native diarized ASR returned invalid or non-monotonic timestamps", "E016")
+        previous_start = start_sec
+        raw_speaker = str(item.get("speaker") or "unknown")
+        if raw_speaker not in labels:
+            labels[raw_speaker] = str(len(labels) + 1)
+        begin_ms = int(round(start_sec * 1000))
+        end_ms = int(round(end_sec * 1000))
+        if end_ms <= begin_ms:
+            raise V1ApiError("native diarized ASR produced an empty caption range", "E016")
+        rows.append(
+            {
+                "lid": labels[raw_speaker],
+                "text": segment_text,
+                "begin": begin_ms,
+                "end": end_ms,
+            }
+        )
+        preserved_parts.append(segment_text)
+
+    preserved_text = "".join(preserved_parts).strip()
+    if preserved_text != text:
+        raise V1ApiError(
+            "native speaker segments did not preserve the full transcript "
+            f"(segment_chars={_pure_text_len(preserved_text)}, "
+            f"transcript_chars={_pure_text_len(text)})",
+            "E016",
+        )
+    if not rows:
+        raise V1ApiError("native diarized ASR returned no textual speaker segments", "E016")
+    return rows
 
 
 def _split_text_parts(text: str) -> List[str]:
@@ -227,6 +322,14 @@ def build_caption_rows(
             normalized_timestamps.append((item, item_len))
     if not normalized_timestamps:
         raise V1ApiError("local ForcedAligner returned no textual timestamps", "E016")
+    aligned_chars = sum(item_len for _, item_len in normalized_timestamps)
+    transcript_chars = _pure_text_len(text)
+    if aligned_chars < transcript_chars:
+        raise V1ApiError(
+            "local ForcedAligner did not cover the full transcript "
+            f"(aligned_chars={aligned_chars}, transcript_chars={transcript_chars})",
+            "E016",
+        )
 
     rows: List[Dict[str, Any]] = []
     timestamp_index = 0
