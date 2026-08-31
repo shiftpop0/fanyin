@@ -7,6 +7,15 @@ Web `dist/`、新版 Nginx 配置及带 Web 只读挂载的启动脚本，不包
 Web 默认开启“区分说话人”，请求使用 `diarize=1`，直接复用 6006 原生片段并避开
 整段 ForcedAligner 的 `E016`。
 
+包信息：
+
+```text
+文件：fanyin-new4.1-web-console-20260831-r1.tar.gz
+大小：324134 字节
+SHA256：ffbb73748e626afe3a19e1265130f2eb5e104951aee4bbdf57d2751c1139f6f2
+SOURCE_COMMIT：2265ad534d2b389336236ea0f151f372d433d84d
+```
+
 ## 1. 校验并安装文件
 
 ```bash

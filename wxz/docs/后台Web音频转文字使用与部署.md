@@ -65,6 +65,18 @@ tailect/web/dist/assets/
 
 ## 5. 8885 部署
 
+生产离线增量包：
+
+```text
+fanyin-new4.1-web-console-20260831-r1.tar.gz
+大小：324134 字节
+SHA256：ffbb73748e626afe3a19e1265130f2eb5e104951aee4bbdf57d2751c1139f6f2
+SOURCE_COMMIT：2265ad534d2b389336236ea0f151f372d433d84d
+```
+
+该包包含已构建的 `dist/`、Nginx 静态站点配置、平台容器启动脚本及可回退的
+文件级应用脚本。完整生产操作见包内 `migration/README_web_console.md`。
+
 新的 8885 结构：
 
 ```text
