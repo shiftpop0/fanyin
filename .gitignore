@@ -49,6 +49,7 @@ node_modules/
 /spyware-translator-v4.1/temp/
 /spyware-translator-v4.1/**/runtime/
 /wxz/temp/
+/wxz/
 
 # Environment and logs
 .env
