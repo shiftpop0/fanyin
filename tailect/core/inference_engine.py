@@ -30,6 +30,7 @@ from core.model_loader import (
     install_torchaudio_compat_shim,
 )
 from core.audio_processor import clip_audio, safe_remove, format_wall_time
+from core.vad import OfflineVADWrapper
 
 # ===================================================================
 # 路径解析
@@ -83,6 +84,38 @@ def resolve_diarization_project_path(configured_path: str) -> str:
         "Invalid diarization project path. "
         f"configured='{configured_path}', checked=[{checked_summary}]"
     )
+
+
+def read_audio_mono_16k(
+    audio_path: str,
+    target_sample_rate: int = 16000,
+) -> Tuple[np.ndarray, int]:
+    """完整读取音频，统一为 mode=2 使用的 mono float32 目标采样率。"""
+    audio_data, source_sample_rate = sf.read(
+        audio_path,
+        dtype="float32",
+        always_2d=True,
+    )
+    source_sample_rate = int(source_sample_rate)
+    if source_sample_rate <= 0:
+        raise RuntimeError(f"Invalid audio sample rate: {source_sample_rate}")
+    if audio_data.size == 0:
+        return np.zeros((0,), dtype=np.float32), int(target_sample_rate)
+
+    mono = np.mean(np.asarray(audio_data, dtype=np.float32), axis=1, dtype=np.float32)
+    mono = np.nan_to_num(mono, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    target_sample_rate = int(target_sample_rate)
+    if target_sample_rate <= 0:
+        raise RuntimeError(f"Invalid target sample rate: {target_sample_rate}")
+    if source_sample_rate != target_sample_rate:
+        import librosa
+
+        mono = librosa.resample(
+            mono,
+            orig_sr=source_sample_rate,
+            target_sr=target_sample_rate,
+        )
+    return np.ascontiguousarray(mono, dtype=np.float32), target_sample_rate
 
 
 # ===================================================================
@@ -358,7 +391,12 @@ class ASRWrapper:
         """批量转录并保持原有的纯文本返回合同。"""
         return [item["text"] for item in self.transcribe_batch_detailed(audio_list)]
 
-    def transcribe_batch_detailed(self, audio_list: List[Any]) -> List[Dict[str, str]]:
+    def transcribe_batch_detailed(
+        self,
+        audio_list: List[Any],
+        *,
+        raise_on_failure: bool = False,
+    ) -> List[Dict[str, str]]:
         """真批量转录，同时保留每个片段的模型语言。
 
         将音频按 _BATCH_SAFE_LIMIT（min(batch_size, 48)）切成多个小 batch，
@@ -425,6 +463,11 @@ class ASRWrapper:
                                 "[ASR] Fallback transcription failed idx=%s: %s",
                                 chunk_start + i, e2,
                             )
+                            if raise_on_failure:
+                                raise RuntimeError(
+                                    "ASR fallback transcription failed at segment "
+                                    f"{chunk_start + i}: {e2}"
+                                ) from e2
                             detail = {"text": "", "language": ""}
                         results.append(
                             {
@@ -878,12 +921,25 @@ def transcribe_with_retry(
 
 
 class UnifiedService:
-    """统一服务：启动时加载三个模型，提供无状态推理方法。"""
+    """统一服务：加载 ASR、独立 VAD、说话人及辅助模型，提供无状态推理。"""
 
     def __init__(self, config: Dict[str, Any]) -> None:
         self.config = config
         self.asr = ASRWrapper(config=config)
         self._asr_lock = threading.Lock()
+        self.vad: Optional[OfflineVADWrapper] = None
+        self.vad_init_error: Optional[str] = None
+        try:
+            self.vad = OfflineVADWrapper(
+                model_path=str(config["vad_model_path"]),
+                device=str(config.get("vad_device", "cuda")),
+                timeout_seconds=float(config.get("vad_timeout", 120)),
+                min_segment_seconds=float(config.get("vad_min_segment_seconds", 0.0)),
+                max_segment_seconds=float(config.get("vad_max_segment_seconds", 60.0)),
+            )
+        except Exception as e:
+            self.vad_init_error = str(e)
+            logger.warning("[VAD] Independent VAD disabled at startup: %s", e, exc_info=True)
         self.diarization: Optional[DiarizationWrapper] = None
         self.diarization_init_error: Optional[str] = None
         try:
@@ -909,6 +965,8 @@ class UnifiedService:
         )
 
     def close(self) -> None:
+        if self.vad is not None:
+            self.vad.close()
         self.asr.close()
 
     def asr_raw(self, audio_path: str) -> Dict[str, Any]:
@@ -1013,6 +1071,253 @@ class UnifiedService:
         """恢复文本标点"""
         return {"text": self.punctuation.restore(text)}
 
+    def _transcribe_segments(
+        self,
+        audio_data: np.ndarray,
+        sr: int,
+        segments: List[Dict[str, Any]],
+        input_filename: str,
+        *,
+        request_id: str,
+        mode_name: str,
+        strict_failures: bool,
+    ) -> Dict[str, Any]:
+        """与片段来源无关的裁剪、批量 ASR、重试和顺序聚合内核。"""
+        worker_count = max(1, int(self.config["segment_workers"]))
+        logger.info(
+            "[SEG-ASR] request_id=%s mode=%s processing %s segments "
+            "via batch inference (worker_count=%s, max_batch_size=%s)",
+            request_id,
+            mode_name,
+            len(segments),
+            worker_count,
+            self.config.get("asr_batch_size", "default"),
+        )
+
+        clips: List[np.ndarray] = []
+        for idx, seg in enumerate(segments):
+            clip = clip_audio(audio_data, sr, float(seg["start"]), float(seg["end"]))
+            if strict_failures and clip.size == 0:
+                raise RuntimeError(f"Empty audio clip generated for segment {idx}")
+            clips.append(clip)
+
+        if not clips:
+            return {
+                "input_file": input_filename,
+                "overall_text": "",
+                "segments": [],
+                "timing_debug": {"available": False},
+                "segment_workers_effective": worker_count,
+                "request_id": request_id,
+                "detected_languages": [],
+                "segment_count": 0,
+                "completed_segment_count": 0,
+            }
+
+        def transcribe_sequentially() -> List[Dict[str, str]]:
+            details: List[Dict[str, str]] = []
+            for idx, (clip, seg) in enumerate(zip(clips, segments)):
+                try:
+                    result = transcribe_with_retry(
+                        self.asr,
+                        clip,
+                        sr,
+                        idx,
+                        seg,
+                        request_id,
+                        2,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "[SEG-ASR][FAIL] request_id=%s mode=%s idx=%s error=%s",
+                        request_id,
+                        mode_name,
+                        idx,
+                        exc,
+                    )
+                    if strict_failures:
+                        raise RuntimeError(
+                            f"Segment ASR failed after retries at index {idx}: {exc}"
+                        ) from exc
+                    details.append({"text": "", "language": ""})
+                    continue
+                details.append(
+                    {
+                        "text": str(result.get("text") or ""),
+                        "language": str(result.get("language") or ""),
+                    }
+                )
+            return details
+
+        batch_start = time.time()
+        batch_timeout = float(self.config.get("asr_timeout", 180))
+        with self._asr_lock:
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(
+                        self.asr.transcribe_batch_detailed,
+                        [(clip, sr) for clip in clips],
+                        raise_on_failure=strict_failures,
+                    )
+                    batch_details = future.result(timeout=batch_timeout)
+                if len(batch_details) != len(segments):
+                    raise RuntimeError(
+                        "Segment ASR result count mismatch: "
+                        f"expected={len(segments)} actual={len(batch_details)}"
+                    )
+            except concurrent.futures.TimeoutError:
+                logger.error(
+                    "[SEG-ASR][BATCH-TIMEOUT] request_id=%s mode=%s timeout=%ss; "
+                    "falling back to sequential per-segment transcription",
+                    request_id,
+                    mode_name,
+                    batch_timeout,
+                )
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                batch_details = transcribe_sequentially()
+            except Exception as exc:
+                logger.error(
+                    "[SEG-ASR][BATCH-FAIL] request_id=%s mode=%s error=%s; "
+                    "clearing cache and falling back to sequential",
+                    request_id,
+                    mode_name,
+                    exc,
+                )
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                batch_details = transcribe_sequentially()
+            finally:
+                self.asr.reset_kv_cache()
+
+        if len(batch_details) != len(segments):
+            raise RuntimeError(
+                "Segment ASR result count mismatch after retry: "
+                f"expected={len(segments)} actual={len(batch_details)}"
+            )
+
+        batch_elapsed = time.time() - batch_start
+        estimated_sequential = batch_elapsed * len(segments) if len(segments) > 1 else batch_elapsed
+        logger.info(
+            "[SEG-ASR][BATCH] request_id=%s mode=%s segments=%s batch_elapsed=%.3fs "
+            "(estimated sequential %.1fs, speedup ~%.1fx)",
+            request_id,
+            mode_name,
+            len(segments),
+            batch_elapsed,
+            estimated_sequential,
+            estimated_sequential / batch_elapsed if batch_elapsed > 0 else 1.0,
+        )
+
+        detected_languages: List[str] = []
+        ordered_segments: List[Dict[str, Any]] = []
+        for idx, (seg, detail) in enumerate(zip(segments, batch_details)):
+            text = str(detail.get("text") or "")
+            detected_language = str(detail.get("language") or "").strip()
+            if detected_language:
+                detected_languages.append(detected_language)
+            output_segment: Dict[str, Any] = {
+                "start": float(seg["start"]),
+                "end": float(seg["end"]),
+                "type": str(seg.get("type", "single")),
+                "text": text,
+                "asr_debug": {
+                    "segment_index": idx,
+                    "started_at_epoch": None,
+                    "started_at_wall": None,
+                    "finished_at_epoch": None,
+                    "finished_at_wall": None,
+                    "elapsed_seconds": None,
+                    "thread_name": None,
+                    "attempts": 1,
+                    "empty_segment": not bool(text),
+                    "request_id": request_id,
+                },
+            }
+            if "speaker" in seg:
+                output_segment["speaker"] = str(seg["speaker"])
+            ordered_segments.append(output_segment)
+
+        timing_debug = summarize_segment_timings(ordered_segments)
+        overall_text = "".join(
+            item["text"] for item in ordered_segments if item["text"]
+        )
+        return {
+            "input_file": input_filename,
+            "overall_text": overall_text,
+            "segments": ordered_segments,
+            "timing_debug": timing_debug,
+            "segment_workers_effective": worker_count,
+            "request_id": request_id,
+            "detected_languages": detected_languages,
+            "segment_count": len(segments),
+            "completed_segment_count": len(batch_details),
+        }
+
+    def transcribe_vad_segments(
+        self,
+        audio_path: str,
+        input_filename: str,
+    ) -> Dict[str, Any]:
+        """6006 mode=2：独立 VAD 分段后批量 ASR，不调用说话人模型。"""
+        if self.vad is None:
+            reason = self.vad_init_error or "unknown error"
+            raise RuntimeError(f"Independent VAD module unavailable: {reason}")
+
+        # FSMN VAD 固定要求 16 kHz；不能随 ASR 可调采样率改变该输入合同。
+        audio_data, sr = read_audio_mono_16k(audio_path, 16000)
+        input_duration = float(len(audio_data) / sr) if sr > 0 else 0.0
+        request_id = f"{os.path.basename(input_filename)}-{int(time.time() * 1000)}"
+        vad_started = time.time()
+        segments = self.vad.detect(audio_data, sr)
+        vad_elapsed = time.time() - vad_started
+        vad_speech_duration = sum(
+            float(item["end"]) - float(item["start"])
+            for item in segments
+        )
+
+        core_result = self._transcribe_segments(
+            audio_data,
+            sr,
+            segments,
+            input_filename,
+            request_id=request_id,
+            mode_name="vad_segment_asr",
+            strict_failures=True,
+        )
+        result = {
+            "input_file": input_filename,
+            "mode": 2,
+            "segmentation_status": "ok" if segments else "no_speech",
+            "overall_text": core_result["overall_text"],
+            "segments": core_result["segments"],
+            "segment_count": core_result["segment_count"],
+            "completed_segment_count": core_result["completed_segment_count"],
+            "detected_languages": core_result["detected_languages"],
+            "input_duration_seconds": round(input_duration, 3),
+            "vad_speech_duration_seconds": round(vad_speech_duration, 3),
+            "timing_debug": {
+                **core_result["timing_debug"],
+                "vad_elapsed_seconds": round(vad_elapsed, 6),
+            },
+            "segment_workers_effective": core_result["segment_workers_effective"],
+            "request_id": request_id,
+        }
+        logger.info(
+            "[MODE2] request_id=%s duration=%.3fs segments=%s completed=%s "
+            "speech=%.3fs text_len=%s vad_elapsed=%.3fs",
+            request_id,
+            input_duration,
+            result["segment_count"],
+            result["completed_segment_count"],
+            vad_speech_duration,
+            len(result["overall_text"]),
+            vad_elapsed,
+        )
+        return result
+
     def transcribe_diarized_segments(
         self,
         audio_path: str,
@@ -1099,156 +1404,31 @@ class UnifiedService:
                 ] if str(fallback_result.get("language") or "").strip() else [],
             }
 
-        worker_count = max(1, int(self.config["segment_workers"]))
-        logger.info(
-            "[SEG-ASR] request_id=%s processing %s segments via batch inference (worker_count=%s, max_batch_size=%s)",
-            request_id,
-            len(segments),
-            worker_count,
-            self.config.get("asr_batch_size", "default"),
+        core_result = self._transcribe_segments(
+            audio_data,
+            sr,
+            segments,
+            input_filename,
+            request_id=request_id,
+            mode_name="diarized_segment_asr",
+            strict_failures=False,
         )
-
-        # ===== 批量推理：利用 Qwen3ASRModel 原生批处理能力 =====
-        # 一次性裁剪所有片段，批量送入 GPU 推理，大幅提升吞吐量
-        # 原顺序处理：10 片段 × 2 秒 = 20 秒，GPU 利用率极低
-        # 批量处理：1 次调用 ≈ 2-3 秒，GPU 利用率大幅提升
-        results_map: Dict[int, Dict[str, Any]] = {}
-
-        # Step 1: 裁剪所有片段
-        clips: List[np.ndarray] = []
-        for idx, seg in enumerate(segments):
-            clip = clip_audio(audio_data, sr, float(seg["start"]), float(seg["end"]))
-            clips.append(clip)
-
-        # Step 2: 批量转录（加锁串行化 + 超时保护 + 主动分批，避免 KV cache 并发污染）
-        batch_start = time.time()
-        batch_timeout = float(self.config.get("asr_timeout", 180))
-        with self._asr_lock:
-            try:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(
-                        self.asr.transcribe_batch_detailed,
-                        [(clip, sr) for clip in clips],
-                    )
-                    batch_details = future.result(timeout=batch_timeout)
-            except concurrent.futures.TimeoutError:
-                logger.error(
-                    "[SEG-ASR][BATCH-TIMEOUT] request_id=%s timeout=%ss, "
-                    "falling back to sequential per-segment transcription",
-                    request_id, batch_timeout,
-                )
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                batch_details = []
-                for idx, (clip, seg) in enumerate(zip(clips, segments)):
-                    try:
-                        result = transcribe_with_retry(
-                            self.asr, clip, sr, idx, seg, request_id, 2,
-                        )
-                        batch_details.append(
-                            {
-                                "text": str(result.get("text") or ""),
-                                "language": str(result.get("language") or ""),
-                            }
-                        )
-                    except Exception as e2:
-                        logger.error(
-                            "[SEG-ASR][FAIL] request_id=%s idx=%s error=%s",
-                            request_id, idx, e2,
-                        )
-                        batch_details.append({"text": "", "language": ""})
-            except Exception as e:
-                logger.error(
-                    "[SEG-ASR][BATCH-FAIL] request_id=%s error=%s, clearing cache & falling back to sequential",
-                    request_id, e,
-                )
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                batch_details = []
-                for idx, (clip, seg) in enumerate(zip(clips, segments)):
-                    try:
-                        result = transcribe_with_retry(
-                            self.asr, clip, sr, idx, seg, request_id, 2,
-                        )
-                        batch_details.append(
-                            {
-                                "text": str(result.get("text") or ""),
-                                "language": str(result.get("language") or ""),
-                            }
-                        )
-                    except Exception as e2:
-                        logger.error(
-                            "[SEG-ASR][FAIL] request_id=%s idx=%s error=%s",
-                            request_id, idx, e2,
-                        )
-                        batch_details.append({"text": "", "language": ""})
-            finally:
-                self.asr.reset_kv_cache()
-
-        batch_elapsed = time.time() - batch_start
-        estimated_sequential = batch_elapsed * len(segments) if len(segments) > 1 else batch_elapsed
-        logger.info(
-            "[SEG-ASR][BATCH] request_id=%s segments=%s batch_elapsed=%.3fs "
-            "(estimated sequential %.1fs, speedup ~%.1fx)",
-            request_id, len(segments), batch_elapsed,
-            estimated_sequential,
-            estimated_sequential / batch_elapsed if batch_elapsed > 0 else 1.0,
+        ordered_segments = core_result["segments"]
+        speaker_count = (
+            len({item["speaker"] for item in ordered_segments})
+            if ordered_segments
+            else 0
         )
-
-        # Step 3: 组装结果
-        detected_languages: List[str] = []
-        for idx, seg in enumerate(segments):
-            detail = batch_details[idx] if idx < len(batch_details) else {}
-            text = str(detail.get("text") or "")
-            detected_language = str(detail.get("language") or "").strip()
-            if detected_language:
-                detected_languages.append(detected_language)
-            results_map[idx] = {
-                "start": float(seg["start"]),
-                "end": float(seg["end"]),
-                "speaker": str(seg["speaker"]),
-                "type": str(seg.get("type", "single")),
-                "text": str(text),
-                "asr_debug": {
-                    "segment_index": idx,
-                    "started_at_epoch": None,
-                    "started_at_wall": None,
-                    "finished_at_epoch": None,
-                    "finished_at_wall": None,
-                    "elapsed_seconds": None,
-                    "thread_name": None,
-                    "attempts": 1,
-                    "empty_segment": not bool(text),
-                    "request_id": request_id,
-                },
-            }
-
-        ordered_segments: List[Dict[str, Any]] = [results_map[i] for i in sorted(results_map.keys())]
-        timing_debug = summarize_segment_timings(ordered_segments)
-        if timing_debug.get("available"):
-            logger.info(
-                "[SEG-ASR][SUMMARY] request_id=%s mode=%s reason=%s smallest_start_gap_seconds=%s",
-                request_id,
-                timing_debug.get("execution_mode"),
-                timing_debug.get("execution_reason"),
-                timing_debug.get("smallest_start_gap_seconds"),
-            )
-
-        speaker_count = len({item["speaker"] for item in ordered_segments}) if ordered_segments else 0
-        overall_text = "".join([item["text"] for item in ordered_segments if item["text"]])
-
         return {
             "input_file": input_filename,
             "speaker_count": speaker_count,
             "diarization_status": diarization_status,
-            "overall_text": overall_text,
+            "overall_text": core_result["overall_text"],
             "speaker_segments": ordered_segments,
-            "timing_debug": timing_debug,
-            "segment_workers_effective": worker_count,
+            "timing_debug": core_result["timing_debug"],
+            "segment_workers_effective": core_result["segment_workers_effective"],
             "request_id": request_id,
-            "detected_languages": detected_languages,
+            "detected_languages": core_result["detected_languages"],
         }
 
     def diarization_then_asr(self, audio_path: str, input_filename: str) -> Dict[str, Any]:

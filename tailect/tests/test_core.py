@@ -27,6 +27,8 @@ class TestConfig(unittest.TestCase):
         self.assertIn("server_host", CONFIG)
         self.assertIn("server_port", CONFIG)
         self.assertEqual(CONFIG["server_port"], 6006)
+        self.assertIn("vad_model_path", CONFIG)
+        self.assertEqual(CONFIG["vad_max_segment_seconds"], 60.0)
 
     def test_get_config_returns_copy(self):
         from core.config import CONFIG, get_config
@@ -121,11 +123,13 @@ class TestModelLoader(unittest.TestCase):
             install_numpy_compat_shim,
             install_torchaudio_compat_shim,
             patch_mistral_tokenizer,
+            load_vad_model,
         )
 
         self.assertTrue(callable(install_numpy_compat_shim))
         self.assertTrue(callable(install_torchaudio_compat_shim))
         self.assertTrue(callable(patch_mistral_tokenizer))
+        self.assertTrue(callable(load_vad_model))
 
     def test_install_numpy_compat_shim(self):
         import numpy as np
@@ -170,11 +174,15 @@ class TestInferenceEngine(unittest.TestCase):
             resolve_diarization_project_path,
             summarize_segment_timings,
             transcribe_with_retry,
+            read_audio_mono_16k,
         )
+        from core.vad import OfflineVADWrapper
 
         self.assertTrue(callable(resolve_diarization_project_path))
         self.assertTrue(callable(summarize_segment_timings))
         self.assertTrue(callable(transcribe_with_retry))
+        self.assertTrue(callable(read_audio_mono_16k))
+        self.assertTrue(OfflineVADWrapper)
 
     def test_resolve_diarization_project_path_invalid(self):
         from core.inference_engine import resolve_diarization_project_path
@@ -232,6 +240,66 @@ class TestInferenceEngine(unittest.TestCase):
         )
         self.assertEqual(texts, ["text-0", "text-1"])
 
+    def test_mode2_uses_vad_segments_without_diarization(self):
+        from unittest.mock import patch
+
+        from core.inference_engine import UnifiedService
+
+        class FakeVad:
+            def detect(self, audio, sample_rate):
+                self.audio = audio
+                self.sample_rate = sample_rate
+                return [
+                    {"start": 0.0, "end": 0.5, "type": "single"},
+                    {"start": 0.5, "end": 1.0, "type": "single"},
+                ]
+
+        class ForbiddenDiarization:
+            def __getattr__(self, name):
+                raise AssertionError(f"mode=2 must not access diarization: {name}")
+
+        class FakeAsr:
+            def transcribe_batch_detailed(self, _items, *, raise_on_failure=False):
+                self.raise_on_failure = raise_on_failure
+                return [
+                    {"text": "你好。", "language": "Chinese"},
+                    {"text": "世界。", "language": "Chinese"},
+                ]
+
+            def reset_kv_cache(self):
+                return None
+
+        import threading
+        import numpy as np
+
+        service = UnifiedService.__new__(UnifiedService)
+        service.config = {
+            "asr_target_sample_rate": 16000,
+            "segment_workers": 32,
+            "asr_batch_size": 32,
+            "asr_timeout": 30,
+        }
+        service.vad = FakeVad()
+        service.vad_init_error = None
+        service.diarization = ForbiddenDiarization()
+        service.asr = FakeAsr()
+        service._asr_lock = threading.Lock()
+
+        audio = np.zeros((16000,), dtype=np.float32)
+        with patch("core.inference_engine.read_audio_mono_16k", return_value=(audio, 16000)):
+            result = UnifiedService.transcribe_vad_segments(
+                service,
+                "sample.wav",
+                "sample.wav",
+            )
+
+        self.assertEqual(result["mode"], 2)
+        self.assertEqual(result["overall_text"], "你好。世界。")
+        self.assertEqual(result["segment_count"], 2)
+        self.assertEqual(result["completed_segment_count"], 2)
+        self.assertTrue(service.asr.raise_on_failure)
+        self.assertNotIn("speaker", result["segments"][0])
+
 
 class TestAPIServer(unittest.TestCase):
     """测试 API 服务模块"""
@@ -252,6 +320,66 @@ class TestAPIServer(unittest.TestCase):
         self.assertIn("/asr_raw", routes)
         self.assertIn("/forced_align", routes)
         self.assertIn("/punctuation", routes)
+
+    def test_asr_route_dispatches_mode1_and_mode2(self):
+        from unittest.mock import patch
+
+        from core import api_server
+
+        class FakeUpload:
+            filename = "sample.wav"
+
+        class FakeService:
+            def __init__(self):
+                self.calls = []
+
+            def diarization_then_asr(self, **kwargs):
+                self.calls.append(("mode1", kwargs))
+                return {"overall_text": "mode1"}
+
+            def transcribe_vad_segments(self, **kwargs):
+                self.calls.append(("mode2", kwargs))
+                return {"mode": 2, "overall_text": "mode2", "segments": []}
+
+            def asr_raw(self, path):
+                self.calls.append(("raw", path))
+                return {"text": "raw", "language": ""}
+
+        service = FakeService()
+        with (
+            patch.object(api_server, "SERVICE", service),
+            patch.object(api_server, "save_upload_file", return_value="sample.wav"),
+            patch.object(api_server, "ensure_wav_audio", return_value="sample.wav"),
+            patch.object(api_server, "safe_remove"),
+        ):
+            mode1 = api_server.asr_api(mode=1, diarization=None, file=FakeUpload())
+            mode2 = api_server.asr_api(mode=2, diarization=None, file=FakeUpload())
+            legacy = api_server.asr_api(mode=None, diarization=False, file=FakeUpload())
+
+        self.assertEqual(mode1["overall_text"], "mode1")
+        self.assertEqual(mode2["overall_text"], "mode2")
+        self.assertEqual(legacy["text"], "raw")
+        self.assertEqual([item[0] for item in service.calls], ["mode1", "mode2", "raw"])
+
+    def test_asr_route_rejects_mode_and_diarization_together_before_upload(self):
+        from unittest.mock import patch
+
+        from fastapi import HTTPException
+        from core import api_server
+
+        class FakeUpload:
+            filename = "sample.wav"
+
+        with (
+            patch.object(api_server, "SERVICE", object()),
+            patch.object(api_server, "save_upload_file") as save_upload,
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                api_server.asr_api(mode=1, diarization=True, file=FakeUpload())
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("cannot be used together", raised.exception.detail)
+        save_upload.assert_not_called()
 
 
 class TestMainWrapper(unittest.TestCase):

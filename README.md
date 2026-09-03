@@ -6,7 +6,8 @@
 
 - `tailect/`：当前离线 ASR、ForcedAligner、TargetDiarization、通用 API 与平台 API 源码。
 - `spyware-translator-v4.1/`：V4.1 专用油猴脚本、本机 CSV 助手及测试工具。
-- `wxz/docs/`：本次扩展的计划、API、部署和油猴使用文档。
+- `doc/`：项目统一文档入口，包含计划、API、部署、使用说明和历史来源索引。
+- `wxz/docs/`：合并前的历史文档源目录，仅为保留溯源，不再作为文档入口。
 - `wxz/deploy/`：单 4090 启动脚本及 8885 平台 Nginx 配置。
 - `del/`：本机保留的旧项目参考文件，不进入 Git。
 
@@ -23,12 +24,16 @@
 
 ## 入口
 
-- [项目交接文档](wxz/docs/项目交接文档.md)
+- [文档总索引与来源记录](doc/README.md)
+- [6006 mode 参数与 mode=2 独立 VAD 分段转译模式实施计划](doc/6006_mode参数与mode2独立VAD分段转译模式实施计划_20260903.md)
+- [RTX 5090 mode=2 真实模型验收报告](wxz/benchmark_5090/mode2_validation_20260903/RTX5090_mode2真实模型验收报告_20260903.md)
+- [mode=2 验收材料索引](wxz/benchmark_5090/mode2_validation_20260903/README.md)
+- [项目交接文档](doc/项目交接文档.md)
 - [当前模型项目说明](tailect/README.md)
-- [V4.1 接口与部署手册](wxz/docs/Tailect_V4.1离线接口与部署.md)
-- [V4.1 油猴使用说明](wxz/docs/油猴脚本V4.1使用说明.md)
-- [后台 Web 音频转文字使用与部署](wxz/docs/后台Web音频转文字使用与部署.md)
-- [R9：8885 复用 6006 原生转译能力实施与验收](wxz/docs/R9_8885复用6006原生转译能力实施与验收.md)
+- [V4.1 接口与部署手册](doc/Tailect_V4.1离线接口与部署.md)
+- [V4.1 油猴使用说明](doc/油猴脚本V4.1使用说明.md)
+- [后台 Web 音频转文字使用与部署](doc/后台Web音频转文字使用与部署.md)
+- [R9：8885 复用 6006 原生转译能力实施与验收](doc/R9_8885复用6006原生转译能力实施与验收.md)
 - [8885 与 6006 同音频识别差异分析](wxz/8885与6006同音频识别差异分析.md)
-- [完整实施计划](wxz/docs/new4.1_API与油猴脚本扩展实施计划.md)
+- [完整实施计划](doc/new4.1_API与油猴脚本扩展实施计划.md)
 - [单 4090 启动脚本](wxz/deploy/run_v4_1_single_4090.sh)

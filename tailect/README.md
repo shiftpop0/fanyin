@@ -56,13 +56,14 @@
 | **语音识别 (ASR)** | `POST /asr`, `POST /asr_raw` | 基于 Qwen3-ASR 的高精度语音转文本 |
 | **说话人日志 (Diarization)** | `POST /diarization` | 识别音频中不同说话人及其时间区间 |
 | **说话人分离 + 批量 ASR** | `POST /asr?diarization=true` | 先分离说话人，再对每段进行 **批量推理**（`transcribe_batch`） |
+| **独立 VAD 分段 + 批量 ASR** | `POST /asr?mode=2` | 不调用说话人模型，使用本地 FSMN VAD 分段并返回时间片与 `overall_text` |
 | **强制对齐 (Forced Alignment)** | `POST /forced_align` | 将文本与音频对齐，输出字/词级时间戳 |
 | **标点恢复 (Punctuation)** | `POST /punctuation` | 为 ASR 结果恢复标点符号 |
 | **平台标准转写** | `POST /v1/audiototext` | `Tailect_V4.1` 固定合同、原生说话人片段或 ForcedAligner 时间戳、FIFO 并发 1 |
 | **油猴 CSV 同步** | `GET/POST /translator/*` | CSV 读取、状态、保存与人工修正 |
 | **健康检查** | `GET /health` | 服务状态监测 |
 
-生产部署保留两个端口角色：6006 是当前 FastAPI 通用接口；8885 由离线 Nginx 仅代理 `/health`、`/v1/audiototext` 和 `/translator/*` 到同一 6006 进程，因此显存中只加载一份模型。单张 4090 的安全启动方式、接口合同、URL 白名单和油猴联调详见 [Tailect_V4.1 离线接口与部署](../wxz/docs/Tailect_V4.1离线接口与部署.md)。
+生产部署保留两个端口角色：6006 是当前 FastAPI 通用接口；8885 由离线 Nginx 仅代理 `/health`、`/v1/audiototext` 和 `/translator/*` 到同一 6006 进程，因此显存中只加载一份模型。单张 4090 的安全启动方式、接口合同、URL 白名单和油猴联调详见 [Tailect_V4.1 离线接口与部署](../doc/Tailect_V4.1离线接口与部署.md)。
 
 > **R9 处理链路：** `8885/v1/audiototext?diarize=1` 与
 > `6006/asr?diarization=true` 复用同一个“TargetDiarization → 说话人片段裁剪 →
@@ -74,6 +75,11 @@
 > 多声道 PCM WAV 合并由 V4.1 油猴脚本 `0.5.4` 完成。该客户端默认启用
 > `diarize=1`，直接复用 6006 原生分段文字和时间。只有非 WAV 上传为了离线解码
 > 兼容才会由 ffmpeg 转为 16 kHz 单声道 WAV。
+
+> **6006 mode 边界：** `POST /asr?mode=1` 等价于当前
+> `diarization=true`；`POST /asr?mode=2` 使用独立 FSMN VAD 分段，不调用
+> TargetDiarization。`mode` 与 `diarization` 不得同时传入。mode 只属于本轮 6006
+> 原生接口，8885 平台接口暂不继承。
 
 ---
 
@@ -435,16 +441,27 @@ Parameters:
 
 ---
 
-### 语音识别（兼容接口）
+### 语音识别（mode 与兼容接口）
 
 ```
+POST /asr?mode=1
+POST /asr?mode=2
 POST /asr?diarization=false
 Content-Type: multipart/form-data
 
 Parameters:
   - file: 音频文件 (UploadFile)
-  - diarization: 是否先做说话人分离 (Query, default: false)
+  - mode: 6006 模式；1=说话人分离，2=独立 VAD 分段
+  - diarization: 旧兼容参数；不得与 mode 同时传入
 ```
+
+参数规则：
+
+- `mode=1` 等价于旧 `diarization=true`；
+- `mode=2` 返回无说话人字段的 VAD 时间片和完整聚合文本；
+- `mode` 与 `diarization` 同时出现时返回 HTTP 400；
+- 当前未实现 `mode=0`，未知 mode 返回 HTTP 400；
+- `/asr_raw`、未传 mode、旧 `diarization=false` 的行为暂时保持不变。
 
 **`diarization=true` 响应示例：**
 
@@ -473,6 +490,31 @@ Parameters:
     }
   ],
   "timing_debug": { ... }
+}
+```
+
+**`mode=2` 响应示例：**
+
+```json
+{
+  "input_file": "speech.wav",
+  "mode": 2,
+  "segmentation_status": "ok",
+  "overall_text": "第一段文本。第二段文本。",
+  "segments": [
+    {
+      "start": 0.22,
+      "end": 3.53,
+      "type": "single",
+      "text": "第一段文本。",
+      "asr_debug": { "segment_index": 0, "attempts": 1, "empty_segment": false }
+    }
+  ],
+  "segment_count": 2,
+  "completed_segment_count": 2,
+  "input_duration_seconds": 12.0,
+  "vad_speech_duration_seconds": 10.8,
+  "request_id": "speech.wav-..."
 }
 ```
 
@@ -570,6 +612,11 @@ Parameters:
 | `punctuation_device` | `cuda:0` | 标点恢复设备 |
 | `diarization_project_path` | `./TargetDiarization-main` | 说话人分离项目路径 |
 | `diarization_device` | `cuda` | 说话人分离设备 |
+| `vad_model_path` | `model/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch` | mode 2 独立 FSMN VAD 路径 |
+| `vad_device` | `cuda` | mode 2 独立 VAD 设备 |
+| `vad_timeout` | `120` | 独立 VAD 推理超时（秒） |
+| `vad_min_segment_seconds` | `0.0` | VAD 最短片段流程保护值 |
+| `vad_max_segment_seconds` | `60.0` | VAD 超长片段二次切分上限 |
 | `forced_aligner_model_path` | `model/Qwen3-ForcedAligner-0.6B` | 强制对齐模型路径 |
 | `forced_aligner_device` | `cuda:0` | 强制对齐设备 |
 | `server_host` | `0.0.0.0` | 服务监听地址 |

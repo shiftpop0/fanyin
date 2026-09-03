@@ -57,6 +57,7 @@ from core.device_utils import resolve_device, resolve_dtype
 from core.model_loader import (
     load_asr_model,
     load_diarization_model,
+    load_vad_model,
     load_forced_aligner,
     load_punctuation_model,
     install_numpy_compat_shim,
@@ -73,7 +74,9 @@ from core.inference_engine import (
     resolve_diarization_project_path as _resolve_diarization_project_path,
     summarize_segment_timings as _summarize_segment_timings,
     transcribe_with_retry as _transcribe_with_retry,
+    read_audio_mono_16k,
 )
+from core.vad import OfflineVADWrapper, normalize_offline_vad_segments
 from core.streaming_session import StreamingSessionManager, StreamingSession
 from core.api_server import (
     app,
@@ -98,11 +101,12 @@ from core.api_server import (
 __all__ = [
     "CONFIG", "get_config", "logger",
     "resolve_device", "resolve_dtype",
-    "load_asr_model", "load_diarization_model", "load_forced_aligner",
+    "load_asr_model", "load_diarization_model", "load_vad_model", "load_forced_aligner",
     "load_punctuation_model", "install_numpy_compat_shim", "install_torchaudio_compat_shim",
     "save_upload_file", "safe_remove", "clip_audio", "format_wall_time",
-    "ASRWrapper", "DiarizationWrapper", "ForcedAlignWrapper",
+    "ASRWrapper", "DiarizationWrapper", "OfflineVADWrapper", "ForcedAlignWrapper",
     "PunctuationRestorer", "UnifiedService", "StreamingManager",
+    "normalize_offline_vad_segments", "read_audio_mono_16k",
     "StreamingSessionManager", "StreamingSession",
     "app", "find_and_kill_process_on_port", "SERVICE",
     "STREAMING_MANAGER", "SESSION_MANAGER",

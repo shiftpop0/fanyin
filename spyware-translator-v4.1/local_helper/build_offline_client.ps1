@@ -63,7 +63,7 @@ if (-not $startupBat) {
 }
 Copy-Item -LiteralPath $startupBat.FullName `
     -Destination (Join-Path $payloadHelperDir "start_local_csv_helper.bat")
-$documentationDir = Join-Path $translatorDir "..\wxz\docs"
+$documentationDir = Join-Path $translatorDir "..\doc"
 $helperDocumentation = Get-ChildItem -LiteralPath $documentationDir -File -Filter "*CSV*.md" |
     Select-Object -First 1
 if (-not $helperDocumentation) {

@@ -334,6 +334,37 @@ def load_diarization_model(project_path: str, device: str) -> Any:
 
 
 # ===================================================================
+# 独立 VAD 模型加载（mode=2）
+# ===================================================================
+
+
+def load_vad_model(model_path: str, device: str) -> Any:
+    """独立加载本地 FSMN VAD，不导入 TargetDiarization。"""
+    resolved_path = os.path.abspath(model_path)
+    if not os.path.isdir(resolved_path):
+        raise RuntimeError(f"Invalid VAD model path: {resolved_path}")
+
+    try:
+        from funasr import AutoModel
+    except Exception as e:
+        raise RuntimeError("Failed to import funasr.AutoModel for independent VAD") from e
+
+    # model 使用本地绝对路径且禁止更新，确保离线运行，不触发模型下载。
+    logger.info("[VAD] Loading independent FSMN VAD from %s on %s", resolved_path, device)
+    try:
+        model = AutoModel(
+            model=resolved_path,
+            device=device,
+            disable_pbar=True,
+            disable_update=True,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Failed to load independent VAD model from {resolved_path}: {e}") from e
+    logger.info("[VAD] Independent FSMN VAD loaded successfully")
+    return model
+
+
+# ===================================================================
 # 强制对齐模型加载
 # ===================================================================
 

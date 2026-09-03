@@ -53,6 +53,14 @@ CONFIG: Dict[str, Any] = {
                                        # 容器内只有一张卡，默认 cuda 即可
     "diarization_timeout": 60,
 
+    # ===== mode=2 独立 VAD 分段配置 =====
+    # 独立加载 FSMN VAD，不经 TargetDiarization 或说话人模型调用链。
+    "vad_model_path": "model/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+    "vad_device": "cuda",
+    "vad_timeout": 120,
+    "vad_min_segment_seconds": 0.0,
+    "vad_max_segment_seconds": 60.0,
+
     # ===== 强制对齐配置 =====
     "forced_aligner_model_path": "model/Qwen3-ForcedAligner-0.6B",
     "forced_aligner_device": "cuda:0",  # 容器内只有一张卡，始终用 cuda:0

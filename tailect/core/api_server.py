@@ -25,6 +25,11 @@ from core.logger import logger
 from core.inference_engine import UnifiedService, StreamingManager
 from core.streaming_session import StreamingSessionManager
 from core.audio_processor import safe_remove
+from core.mode import (
+    ModeParameterError,
+    dispatch_asr_mode,
+    resolve_asr_mode,
+)
 from core.v1_router import PlatformApi
 
 
@@ -285,6 +290,7 @@ def health() -> Dict[str, Any]:
         and SESSION_MANAGER is not None
     )
     diarization_ready = SERVICE is not None and SERVICE.diarization is not None
+    vad_ready = SERVICE is not None and SERVICE.vad is not None
     forced_aligner_ready = SERVICE is not None and SERVICE.forced_aligner is not None
     punctuation_ready = (
         SERVICE is not None
@@ -297,6 +303,10 @@ def health() -> Dict[str, Any]:
         "server": "uvicorn",
         "cuda": bool(torch.cuda.is_available()),
         "service_ready": SERVICE is not None,
+        "vad_ready": vad_ready,
+        "vad_error": (
+            str(SERVICE.vad_init_error or "") if SERVICE is not None else "service unavailable"
+        ),
         "diarization_ready": diarization_ready,
         "diarization_error": (
             str(SERVICE.diarization_init_error or "") if SERVICE is not None else "service unavailable"
@@ -377,28 +387,45 @@ def forced_align_api(
 
 @app.post("/asr")
 def asr_api(
-    diarization: bool = Query(False, description="是否启用说话人区分后分段 ASR"),
+    mode: Optional[int] = Query(
+        None,
+        description="6006 转译模式：1=说话人分离，2=独立 VAD 分段",
+    ),
+    diarization: Optional[bool] = Query(
+        None,
+        description="旧兼容参数；不得与 mode 同时使用",
+    ),
     file: UploadFile = File(...),
 ) -> Dict[str, Any]:
-    """兼容旧接口：
-    - diarization=false: 等同 /asr_raw
-    - diarization=true: 先 diarization 再分段 ASR
+    """6006 原生转译接口。
+
+    - mode=1: 当前说话人分离后分段 ASR
+    - mode=2: 独立 FSMN VAD 分段 ASR
+    - 未传 mode 时保持旧 diarization 行为
+    - mode 与 diarization 同时出现时拒绝请求
     """
     if SERVICE is None:
         raise HTTPException(status_code=500, detail="Service is not initialized")
+
+    try:
+        resolved_mode = resolve_asr_mode(mode, diarization)
+    except ModeParameterError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     temp_path = ""
     try:
         temp_path = save_upload_file(file)
         temp_path = ensure_wav_audio(temp_path)
 
-        if not diarization:
-            return SERVICE.asr_raw(temp_path)
-
-        return SERVICE.diarization_then_asr(
-            audio_path=temp_path,
-            input_filename=file.filename or os.path.basename(temp_path),
-        )
+        try:
+            return dispatch_asr_mode(
+                SERVICE,
+                resolved_mode,
+                temp_path,
+                file.filename or os.path.basename(temp_path),
+            )
+        except ModeParameterError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
     except TimeoutError as e:
         logger.error("Timeout: %s", e)
         raise HTTPException(status_code=504, detail=str(e))
